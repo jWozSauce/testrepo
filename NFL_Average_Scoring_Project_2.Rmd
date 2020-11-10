@@ -1,0 +1,933 @@
+
+
+
+```{r Load Libraries}
+library(dplyr)
+library(readr)
+library(stringr)
+library(tidyr)
+library(fitdistrplus)
+options(stringsAsFactors = FALSE)
+
+```
+
+
+```{r Load 1H Spreads Data}
+NFL_1H_spreads_2011_2012 <- read_csv("NFL_1H_spreads_2011_2012.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL) %>%
+  mutate(season_year = 2011)
+NFL_1H_spreads_2012_2013 <- read_csv("NFL_1H_spreads_2012_2013.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL) %>%
+  mutate(season_year = 2012)
+NFL_1H_spreads_2013_2014 <- read_csv("NFL_1H_spreads_2013_2014.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)  %>%
+  mutate(season_year = 2013)
+NFL_1H_spreads_2014_2015 <- read_csv("NFL_1H_spreads_2014_2015.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)  %>%
+  mutate(season_year = 2014)
+NFL_1H_spreads_2015_2016 <- read_csv("NFL_1H_spreads_2015_2016.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)  %>%
+  mutate(season_year = 2015)
+NFL_1H_spreads_2016_2017 <- read_csv("NFL_1H_spreads_2016_2017.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)  %>%
+  mutate(season_year = 2016)
+NFL_1H_spreads_2017_2018 <- read_csv("NFL_1H_spreads_2017_2018.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)  %>%
+  mutate(season_year = 2017)
+NFL_1H_spreads_2018_2019 <- read_csv("NFL_1H_spreads_2018_2019.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)  %>%
+  mutate(season_year = 2018)
+NFL_1H_spreads_2019_2020 <- read_csv("NFL_1H_spreads_2019_2020.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)  %>%
+  mutate(season_year = 2019)
+NFL_1H_spreads_2020_2021 <- read_csv("NFL_1H_spreads_2020_2021.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)  %>%
+  mutate(season_year = 2020)
+
+NFL_1H_spreads_cmb <- rbind(NFL_1H_spreads_2011_2012,
+                            NFL_1H_spreads_2012_2013,
+                            NFL_1H_spreads_2013_2014,
+                            NFL_1H_spreads_2014_2015,
+                            NFL_1H_spreads_2015_2016,
+                            NFL_1H_spreads_2016_2017,
+                            NFL_1H_spreads_2017_2018,
+                            NFL_1H_spreads_2018_2019,
+                            NFL_1H_spreads_2019_2020,
+                            NFL_1H_spreads_2020_2021)
+```
+
+```{r Load 1H Spreads Data}
+NFL_1H_totals_2011_2012 <- read_csv("NFL_1H_totals_2011_2012.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_1H_totals_2012_2013 <- read_csv("NFL_1H_totals_2012_2013.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_1H_totals_2013_2014 <- read_csv("NFL_1H_totals_2013_2014.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_1H_totals_2014_2015 <- read_csv("NFL_1H_totals_2014_2015.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_1H_totals_2015_2016 <- read_csv("NFL_1H_totals_2015_2016.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_1H_totals_2016_2017 <- read_csv("NFL_1H_totals_2016_2017.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_1H_totals_2017_2018 <- read_csv("NFL_1H_totals_2017_2018.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_1H_totals_2018_2019 <- read_csv("NFL_1H_totals_2018_2019.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_1H_totals_2019_2020 <- read_csv("NFL_1H_totals_2019_2020.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_1H_totals_2020_2021 <- read_csv("NFL_1H_totals_2020_2021.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+
+NFL_1H_totals_cmb <- rbind(NFL_1H_totals_2011_2012,
+                            NFL_1H_totals_2012_2013,
+                            NFL_1H_totals_2013_2014,
+                            NFL_1H_totals_2014_2015,
+                            NFL_1H_totals_2015_2016,
+                            NFL_1H_totals_2016_2017,
+                            NFL_1H_totals_2017_2018,
+                            NFL_1H_totals_2018_2019,
+                            NFL_1H_totals_2019_2020,
+                            NFL_1H_totals_2020_2021)
+```
+
+```{r Load Game Spreads Data}
+NFL_Game_spreads_2011_2012 <- read_csv("NFL_Game_spreads_2011_2012.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_spreads_2012_2013 <- read_csv("NFL_Game_spreads_2012_2013.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_spreads_2013_2014 <- read_csv("NFL_Game_spreads_2013_2014.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_spreads_2014_2015 <- read_csv("NFL_Game_spreads_2014_2015.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_spreads_2015_2016 <- read_csv("NFL_Game_spreads_2015_2016.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_spreads_2016_2017 <- read_csv("NFL_Game_spreads_2016_2017.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_spreads_2017_2018 <- read_csv("NFL_Game_spreads_2017_2018.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_spreads_2018_2019 <- read_csv("NFL_Game_spreads_2018_2019.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_spreads_2019_2020 <- read_csv("NFL_Game_spreads_2019_2020.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_spreads_2020_2021 <- read_csv("NFL_Game_spreads_2020_2021.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+
+NFL_Game_spreads_cmb <- rbind(NFL_Game_spreads_2011_2012,
+                            NFL_Game_spreads_2012_2013,
+                            NFL_Game_spreads_2013_2014,
+                            NFL_Game_spreads_2014_2015,
+                            NFL_Game_spreads_2015_2016,
+                            NFL_Game_spreads_2016_2017,
+                            NFL_Game_spreads_2017_2018,
+                            NFL_Game_spreads_2018_2019,
+                            NFL_Game_spreads_2019_2020,
+                            NFL_Game_spreads_2020_2021)
+```
+
+```{r Load Game Spreads Data}
+NFL_Game_totals_2011_2012 <- read_csv("NFL_Game_totals_2011_2012.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_totals_2012_2013 <- read_csv("NFL_Game_totals_2012_2013.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_totals_2013_2014 <- read_csv("NFL_Game_totals_2013_2014.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_totals_2014_2015 <- read_csv("NFL_Game_totals_2014_2015.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_totals_2015_2016 <- read_csv("NFL_Game_totals_2015_2016.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_totals_2016_2017 <- read_csv("NFL_Game_totals_2016_2017.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_totals_2017_2018 <- read_csv("NFL_Game_totals_2017_2018.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_totals_2018_2019 <- read_csv("NFL_Game_totals_2018_2019.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_totals_2019_2020 <- read_csv("NFL_Game_totals_2019_2020.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+NFL_Game_totals_2020_2021 <- read_csv("NFL_Game_totals_2020_2021.csv", locale(encoding = "ISO-8859-1"),col_names = TRUE,col_types = NULL)
+
+NFL_Game_totals_cmb <- rbind(NFL_Game_totals_2011_2012,
+                            NFL_Game_totals_2012_2013,
+                            NFL_Game_totals_2013_2014,
+                            NFL_Game_totals_2014_2015,
+                            NFL_Game_totals_2015_2016,
+                            NFL_Game_totals_2016_2017,
+                            NFL_Game_totals_2017_2018,
+                            NFL_Game_totals_2018_2019,
+                            NFL_Game_totals_2019_2020,
+                            NFL_Game_totals_2020_2021)
+```
+
+```{r Combine dataframes}
+# Create UIDs 1H spreads
+NFL_1H_spreads_cmb <- NFL_1H_spreads_cmb %>%
+  mutate(game_uid = paste(Date, away_Team, home_Team, sep = " "))
+
+# Create UIDs 1H spreads
+NFL_1H_totals_cmb <- NFL_1H_totals_cmb %>%
+  mutate(game_uid = paste(Date, away_Team, home_Team, sep = " "))
+
+
+# Create UIDs Game spreads
+NFL_Game_spreads_cmb <- NFL_Game_spreads_cmb %>%
+  mutate(game_uid = paste(Date, away_Team, home_Team, sep = " "))
+
+# Create UIDs Game spreads
+NFL_Game_totals_cmb <- NFL_Game_totals_cmb %>%
+  mutate(game_uid = paste(Date, away_Team, home_Team, sep = " "))
+```
+
+```{r Delete unecessary columns and rename for merge}
+# This will be the starting merge DF so I'll keep more columns here. "1" is away team odds, "2" is home team odds
+NFL_1H_spreads_cmb <- NFL_1H_spreads_cmb %>%
+  dplyr::select(Date, 
+                Sport, 
+                away_Team, 
+                home_Team, 
+                game_uid,
+                season_year,
+                away_1Q, 
+                away_2Q,
+                away_3Q,
+                away_4Q,
+                away_score,
+                home_1Q, 
+                home_2Q,
+                home_3Q, 
+                home_4Q,
+                home_score,
+                bookmaker1, 
+                bookmaker2, 
+                pinnacle1, 
+                pinnacle2) %>%
+  dplyr::rename(bookmaker_away_1H_spread = bookmaker1, 
+                bookmaker_home_1H_spread = bookmaker2, 
+                pinnacle_away_1H_spread = pinnacle1, 
+                pinnacle_home_1H_spread = pinnacle2)
+
+NFL_1H_totals_cmb <- NFL_1H_totals_cmb %>%
+  dplyr::select(game_uid,
+                bookmaker1, 
+                bookmaker2, 
+                pinnacle1, 
+                pinnacle2) %>%
+  dplyr::rename(bookmaker_over_1H_total = bookmaker1, 
+                bookmaker_under_1H_total = bookmaker2, 
+                pinnacle_over_1H_total = pinnacle1, 
+                pinnacle_under_1H_total = pinnacle2)
+
+
+NFL_Game_spreads_cmb <- NFL_Game_spreads_cmb %>%
+  dplyr::select(game_uid, 
+                bookmaker1, 
+                bookmaker2, 
+                pinnacle1, 
+                pinnacle2) %>%
+  dplyr::rename(bookmaker_away_game_spread = bookmaker1, 
+                bookmaker_home_game_spread = bookmaker2, 
+                pinnacle_away_game_spread = pinnacle1, 
+                pinnacle_home_game_spread = pinnacle2)
+
+NFL_Game_totals_cmb <- NFL_Game_totals_cmb %>%
+  dplyr::select(game_uid, 
+                bookmaker1, 
+                bookmaker2, 
+                pinnacle1, 
+                pinnacle2) %>%
+  dplyr::rename(bookmaker_over_game_total = bookmaker1, 
+                bookmaker_under_game_total = bookmaker2, 
+                pinnacle_over_game_total = pinnacle1, 
+                pinnacle_under_game_total = pinnacle2)
+
+
+
+
+
+
+```
+
+```{r Merge all DFs together}
+# 1H Merges
+data_1H <- merge(NFL_1H_spreads_cmb, NFL_1H_totals_cmb)
+
+# game Merges
+data_Game <- merge(NFL_Game_spreads_cmb, NFL_Game_totals_cmb)
+
+# merge 1H with game
+data <- merge(data_1H, data_Game)
+```
+
+```{r Clean up DF and create necessary columns}
+# Delete games that I do not have score info for
+data <- na.omit(data)
+
+# Delete rows that dont add up
+data <- data %>%
+  mutate(test_away_score = away_1Q + away_2Q + away_3Q + away_4Q, 
+         test_home_score = home_1Q + home_2Q + home_3Q + home_4Q) %>%
+  mutate(away_score_right = ifelse(test_away_score == away_score, 1, 0)) %>%
+  mutate(home_score_right = ifelse(test_home_score == home_score, 1, 0)) %>%
+  filter(home_score_right == 1) %>%
+  filter(away_score_right == 1)
+
+# Create first half scores
+# data <- data %>%
+#  mutate(away_1H = away_1Q + away_2Q, 
+#         home_1H = home_1Q + home_2Q)
+
+# Replace 1/2 with .5 across entire dframe
+data <- as.data.frame(lapply(data, function(y) gsub("½", '.5',y)))
+# Replace PK with 0 across entire dframe
+data <- as.data.frame(lapply(data, function(y) gsub("PK", '0 ',y)))
+
+
+
+
+
+# Trim Whitespace pinnacle
+
+
+
+
+```
+
+
+```{r Bookmaker Odds cleanup}
+# Bookmaker Odds change
+# Trim whitespace
+data$bookmaker_away_1H_spread <- str_replace(gsub("\\s+", " ", str_trim(data$bookmaker_away_1H_spread)), "B", "b")
+
+data$bookmaker_home_1H_spread <- str_replace(gsub("\\s+", " ", str_trim(data$bookmaker_home_1H_spread)), "B", "b")
+
+data$bookmaker_over_1H_total <- str_replace(gsub("\\s+", " ", str_trim(data$bookmaker_over_1H_total)), "B", "b")
+
+data$bookmaker_under_1H_total <- str_replace(gsub("\\s+", " ", str_trim(data$bookmaker_under_1H_total)), "B", "b")
+
+data$bookmaker_away_game_spread <- str_replace(gsub("\\s+", " ", str_trim(data$bookmaker_away_game_spread)), "B", "b")
+
+data$bookmaker_home_game_spread <- str_replace(gsub("\\s+", " ", str_trim(data$bookmaker_home_game_spread)), "B", "b")
+
+data$bookmaker_over_game_total <- str_replace(gsub("\\s+", " ", str_trim(data$bookmaker_over_game_total)), "B", "b")
+
+data$bookmaker_under_game_total <- str_replace(gsub("\\s+", " ", str_trim(data$bookmaker_under_game_total)), "B", "b")
+
+# Delete odds bookmaker
+data <- data %>% 
+  separate(bookmaker_away_1H_spread,into = c("bookmaker_away_1H_spread_only","bookmaker_away_1H_spread_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(bookmaker_home_1H_spread,into = c("bookmaker_home_1H_spread_only","bookmaker_home_1H_spread_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(bookmaker_over_1H_total,into = c("bookmaker_over_1H_total_only","bookmaker_over_1H_total_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(bookmaker_under_1H_total,into = c("bookmaker_under_1H_total_only","bookmaker_under_1H_total_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+##
+data <- data %>% 
+  separate(bookmaker_away_game_spread,into = c("bookmaker_away_game_spread_only","bookmaker_away_game_spread_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(bookmaker_home_game_spread,into = c("bookmaker_home_game_spread_only","bookmaker_home_game_spread_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(bookmaker_over_game_total,into = c("bookmaker_over_game_total_only","bookmaker_over_game_total_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(bookmaker_under_game_total,into = c("bookmaker_under_game_total_only","bookmaker_under_game_total_odds"),sep = " ",remove = FALSE,extra = "merge")
+```
+
+```{r Pinnacle Odds cleanup}
+# pinnacle Odds change
+# Trim whitespace
+data$pinnacle_away_1H_spread <- str_replace(gsub("\\s+", " ", str_trim(data$pinnacle_away_1H_spread)), "B", "b")
+
+data$pinnacle_home_1H_spread <- str_replace(gsub("\\s+", " ", str_trim(data$pinnacle_home_1H_spread)), "B", "b")
+
+data$pinnacle_over_1H_total <- str_replace(gsub("\\s+", " ", str_trim(data$pinnacle_over_1H_total)), "B", "b")
+
+data$pinnacle_under_1H_total <- str_replace(gsub("\\s+", " ", str_trim(data$pinnacle_under_1H_total)), "B", "b")
+
+data$pinnacle_away_game_spread <- str_replace(gsub("\\s+", " ", str_trim(data$pinnacle_away_game_spread)), "B", "b")
+
+data$pinnacle_home_game_spread <- str_replace(gsub("\\s+", " ", str_trim(data$pinnacle_home_game_spread)), "B", "b")
+
+data$pinnacle_over_game_total <- str_replace(gsub("\\s+", " ", str_trim(data$pinnacle_over_game_total)), "B", "b")
+
+data$pinnacle_under_game_total <- str_replace(gsub("\\s+", " ", str_trim(data$pinnacle_under_game_total)), "B", "b")
+
+# Delete odds pinnacle
+data <- data %>% 
+  separate(pinnacle_away_1H_spread,into = c("pinnacle_away_1H_spread_only","pinnacle_away_1H_spread_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(pinnacle_home_1H_spread,into = c("pinnacle_home_1H_spread_only","pinnacle_home_1H_spread_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(pinnacle_over_1H_total,into = c("pinnacle_over_1H_total_only","pinnacle_over_1H_total_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(pinnacle_under_1H_total,into = c("pinnacle_under_1H_total_only","pinnacle_under_1H_total_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+##
+data <- data %>% 
+  separate(pinnacle_away_game_spread,into = c("pinnacle_away_game_spread_only","pinnacle_away_game_spread_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(pinnacle_home_game_spread,into = c("pinnacle_home_game_spread_only","pinnacle_home_game_spread_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(pinnacle_over_game_total,into = c("pinnacle_over_game_total_only","pinnacle_over_game_total_odds"),sep = " ",remove = FALSE,extra = "merge")
+
+data <- data %>% 
+  separate(pinnacle_under_game_total,into = c("pinnacle_under_game_total_only","pinnacle_under_game_total_odds"),sep = " ",remove = FALSE,extra = "merge")
+```
+
+
+```{r Delete unnecessary columns and flatten data}
+# Convert all columns to numeric type
+data[,6:64] <- sapply(data[,6:64],as.numeric)
+
+# Delete uneeded columns
+data <- data %>%
+  dplyr::select(-bookmaker_away_1H_spread, 
+                -bookmaker_home_1H_spread, 
+                -pinnacle_away_1H_spread, 
+                -pinnacle_home_1H_spread, 
+                -bookmaker_over_1H_total, 
+                -bookmaker_under_1H_total,
+                -pinnacle_over_1H_total, 
+                -pinnacle_under_1H_total, 
+                -bookmaker_away_game_spread, 
+                -bookmaker_home_game_spread, 
+                -pinnacle_away_game_spread, 
+                -pinnacle_home_game_spread, 
+                -bookmaker_over_game_total, 
+                -bookmaker_under_game_total,
+                -pinnacle_over_game_total, 
+                -pinnacle_under_game_total, 
+                -test_away_score,
+                -test_home_score, 
+                -away_score_right,
+                -home_score_right)
+```
+
+```{r Analyze Season Overall Data}
+# Create game total
+data <- data %>%
+  mutate(game_total = away_score + home_score, 
+         first_half_total = away_1Q + away_2Q + home_1Q + home_2Q, 
+         Q1_total = away_1Q + home_1Q, 
+         Q2_total = away_2Q + home_2Q)
+
+# full game total distribution
+hist(data$game_total)
+hist(data$pinnacle_over_game_total_only)
+
+# Test for distribution
+descdist(data$game_total, discrete = FALSE)
+descdist(data$pinnacle_over_game_total_only, discrete = FALSE)
+
+# Aggergate by season
+median_game_total <- aggregate(data$game_total, list(data$season_year), median)
+median_1H_total <- aggregate(data$first_half_total, list(data$season_year), median)
+median_odds_game_total <- aggregate(data$pinnacle_over_game_total_only, list(data$season_year), median)
+median_odds_1H_total <- aggregate(data$pinnacle_over_1H_total_only, list(data$season_year), median)
+
+median_1Q_total <- aggregate(data$Q1_total, list(data$season_year), median)
+median_2Q_total <- aggregate(data$Q2_total, list(data$season_year), median)
+
+# Name columns
+median_game_total <- median_game_total %>%
+  dplyr::rename(Season = Group.1, total_game_median = x)
+median_1H_total <- median_1H_total %>%
+  dplyr::rename(Season = Group.1, total_1H_median = x)
+median_odds_game_total <- median_odds_game_total %>%
+  dplyr::rename(Season = Group.1, odds_game_total_median = x)
+median_odds_1H_total <- median_odds_1H_total %>%
+  dplyr::rename(Season = Group.1, odds_1H_total_median = x)
+median_1Q_total <- median_1Q_total %>%
+  dplyr::rename(Season = Group.1, total_1Q_median = x)
+median_2Q_total <- median_2Q_total %>%
+  dplyr::rename(Season = Group.1, total_2Q_median = x)
+
+# Merge
+median_season_data <- merge(median_game_total, median_odds_game_total)
+median_season_data <- merge(median_season_data, median_1H_total)
+median_season_data <- merge(median_season_data, median_odds_1H_total)
+median_season_data <- merge(median_season_data, median_1Q_total)
+median_season_data <- merge(median_season_data, median_2Q_total)
+
+write.csv(median_season_data, "median_season_data.csv")
+```
+
+```{r Analyze Week by Week Data for 2020}
+# Filter out just 2020
+data_2020 <- data %>%
+  filter(season_year == 2020)
+
+# add in week by week
+# Convert to date
+data_2020$Date <- as.Date(data_2020$Date, format = "%Y %m %d")
+
+# full game total distribution
+hist(data_2020$game_total)
+hist(data_2020$pinnacle_over_game_total_only)
+
+# Test for distribution
+descdist(data_2020$game_total, discrete = FALSE)
+descdist(data_2020$pinnacle_over_game_total_only, discrete = FALSE)
+
+# Add in week based on date
+data_2020 <- data_2020 %>%
+  mutate(Week = ifelse(Date <= "2020-09-14", 1, 
+                       ifelse(Date <= "2020-09-21", 2, 
+                              ifelse(Date <= "2020-09-28", 3, 
+                                     ifelse(Date <= "2020-10-05", 4, 
+                                            ifelse(Date <= "2020-10-13", 5,
+                                                   ifelse(Date <= "2020-10-19", 6,
+                                                          ifelse(Date <= "2020-10-26", 7,
+                                                                 ifelse(Date <= "2020-11-02", 8, 
+                                                                        ifelse(Date <= "2020-11-09", 9,
+                                                   0))))))))))  %>%
+  dplyr::filter(Week != 0)
+
+
+
+
+
+# Aggergate by week
+med_game_total_2020 <- aggregate(data_2020$game_total, list(data_2020$Week), median)
+med_1H_total_2020 <- aggregate(data_2020$first_half_total, list(data_2020$Week), median)
+med_odds_game_total_2020 <- aggregate(data_2020$pinnacle_over_game_total_only, list(data_2020$Week), median)
+med_odds_1H_total_2020 <- aggregate(data_2020$pinnacle_over_1H_total_only, list(data_2020$Week), median)
+median_1Q_total_2020 <- aggregate(data_2020$Q1_total, list(data_2020$Week), median)
+median_2Q_total_2020 <- aggregate(data_2020$Q2_total, list(data_2020$Week), median)
+
+# Name columns
+med_game_total_2020 <- med_game_total_2020 %>%
+  dplyr::rename(Week = Group.1, total_game_med = x)
+med_1H_total_2020 <- med_1H_total_2020 %>%
+  dplyr::rename(Week = Group.1, total_1H_med = x)
+med_odds_game_total_2020 <- med_odds_game_total_2020 %>%
+  dplyr::rename(Week = Group.1, odds_game_total_med = x)
+med_odds_1H_total_2020 <- med_odds_1H_total_2020 %>%
+  dplyr::rename(Week = Group.1, odds_1H_total_med = x)
+median_1Q_total_2020 <- median_1Q_total_2020 %>%
+  dplyr::rename(Week = Group.1, Q1_total_med = x)
+median_2Q_total_2020 <- median_2Q_total_2020 %>%
+  dplyr::rename(Week = Group.1, Q2_total_med = x)
+
+
+# Merge
+med_season_data_2020 <- merge(med_game_total_2020, med_odds_game_total_2020)
+med_season_data_2020 <- merge(med_season_data_2020, med_1H_total_2020)
+med_season_data_2020 <- merge(med_season_data_2020, med_odds_1H_total_2020)
+med_season_data_2020 <- merge(med_season_data_2020, median_1Q_total_2020)
+med_season_data_2020 <- merge(med_season_data_2020, median_2Q_total_2020)
+
+write.csv(med_season_data_2020, "med_season_data_2020.csv")
+```
+
+```{r Analyze Week by Week Data for 2019}
+# Filter out just 2019
+data_2019 <- data %>%
+  filter(season_year == 2019)
+
+# add in week by week
+# Convert to date
+data_2019$Date <- as.Date(data_2019$Date, format = "%Y %m %d")
+
+# full game total distribution
+hist(data_2019$game_total)
+hist(data_2019$pinnacle_over_game_total_only)
+
+# Test for distribution
+descdist(data_2019$game_total, discrete = FALSE)
+descdist(data_2019$pinnacle_over_game_total_only, discrete = FALSE)
+
+# Add in week based on date
+##data_2019 <- data_2019 %>%
+##  mutate(Week = ifelse(Date <= "2019-09-09", 1, 
+##                       ifelse(Date <= "2019-09-16", 2, 
+##                              ifelse(Date <= "2019-09-23", 3, 
+##                                     ifelse(Date <= "2019-09-30", 4, 
+##                                            ifelse(Date <= "2019-10-07", 5, 
+##                                                   ifelse(Date <= "2019-10-14", 6,
+##                                                          ifelse(Date <= "2019-10-21", 7,
+##                                                                 ifelse(Date <= "2019-10-21", 8,
+##                                                   0))))))))  %>%
+##  dplyr::filter(Week != 0)
+
+
+
+# Aggergate by week
+med_game_total_2019 <- aggregate(data_2019$game_total, list(data_2019$Week), median)
+med_1H_total_2019 <- aggregate(data_2019$first_half_total, list(data_2019$Week), median)
+med_odds_game_total_2019 <- aggregate(data_2019$pinnacle_over_game_total_only, list(data_2019$Week), median)
+med_odds_1H_total_2019 <- aggregate(data_2019$pinnacle_over_1H_total_only, list(data_2019$Week), median)
+
+# Name columns
+med_game_total_2019 <- med_game_total_2019 %>%
+  dplyr::rename(Week = Group.1, total_game_med = x)
+med_1H_total_2019 <- med_1H_total_2019 %>%
+  dplyr::rename(Week = Group.1, total_1H_med = x)
+med_odds_game_total_2019 <- med_odds_game_total_2019 %>%
+  dplyr::rename(Week = Group.1, odds_game_total_med = x)
+med_odds_1H_total_2019 <- med_odds_1H_total_2019 %>%
+  dplyr::rename(Week = Group.1, odds_1H_total_med = x)
+
+# Merge
+med_season_data_2019 <- merge(med_game_total_2019, med_odds_game_total_2019)
+med_season_data_2019 <- merge(med_season_data_2019, med_1H_total_2019)
+med_season_data_2019 <- merge(med_season_data_2019, med_odds_1H_total_2019)
+
+write.csv(med_season_data_2019, "med_season_data_2019.csv")
+```
+
+```{r Analyze Week by Week Data for 2018}
+# Filter out just 2018
+data_2018 <- data %>%
+  filter(season_year == 2018)
+
+# add in week by week
+# Convert to date
+data_2018$Date <- as.Date(data_2018$Date, format = "%Y %m %d")
+
+# full game total distribution
+hist(data_2018$game_total)
+hist(data_2018$pinnacle_over_game_total_only)
+
+# Test for distribution
+descdist(data_2018$game_total, discrete = FALSE)
+descdist(data_2018$pinnacle_over_game_total_only, discrete = FALSE)
+
+# Add in week based on date
+## data_2018 <- data_2018 %>%
+##  mutate(Week = ifelse(Date <= "2018-09-10", 1, 
+##                       ifelse(Date <= "2018-09-17", 2, 
+##                              ifelse(Date <= "2018-09-24", 3, 
+##                                     ifelse(Date <= "2018-10-01", 4, 
+##                                            ifelse(Date <= "2018-10-08", 5, 
+##                                                   ifelse(Date <= "2018-10-15", 6,
+##                                                          ifelse(Date <= "2018-10-22", 7,
+##                                                   0))))))))  %>%
+##  dplyr::filter(Week != 0)
+
+
+
+# Aggergate by week
+med_game_total_2018 <- aggregate(data_2018$game_total, list(data_2018$Week), median)
+med_1H_total_2018 <- aggregate(data_2018$first_half_total, list(data_2018$Week), median)
+med_odds_game_total_2018 <- aggregate(data_2018$pinnacle_over_game_total_only, list(data_2018$Week), median)
+med_odds_1H_total_2018 <- aggregate(data_2018$pinnacle_over_1H_total_only, list(data_2018$Week), median)
+
+# Name columns
+med_game_total_2018 <- med_game_total_2018 %>%
+  dplyr::rename(Week = Group.1, total_game_med = x)
+med_1H_total_2018 <- med_1H_total_2018 %>%
+  dplyr::rename(Week = Group.1, total_1H_med = x)
+med_odds_game_total_2018 <- med_odds_game_total_2018 %>%
+  dplyr::rename(Week = Group.1, odds_game_total_med = x)
+med_odds_1H_total_2018 <- med_odds_1H_total_2018 %>%
+  dplyr::rename(Week = Group.1, odds_1H_total_med = x)
+
+# Merge
+med_season_data_2018 <- merge(med_game_total_2018, med_odds_game_total_2018)
+med_season_data_2018 <- merge(med_season_data_2018, med_1H_total_2018)
+med_season_data_2018 <- merge(med_season_data_2018, med_odds_1H_total_2018)
+
+write.csv(med_season_data_2018, "med_season_data_2018.csv")
+```
+
+```{r Analyze Week by Week Data for 2017}
+# Filter out just 2017
+data_2017 <- data %>%
+  filter(season_year == 2017)
+
+# add in week by week
+# Convert to date
+data_2017$Date <- as.Date(data_2017$Date, format = "%Y %m %d")
+
+# full game total distribution
+hist(data_2017$game_total)
+hist(data_2017$pinnacle_over_game_total_only)
+
+# Test for distribution
+descdist(data_2017$game_total, discrete = FALSE)
+descdist(data_2017$pinnacle_over_game_total_only, discrete = FALSE)
+
+# Add in week based on date
+##data_2017 <- data_2017 %>%
+##  mutate(Week = ifelse(Date <= "2017-09-11", 1, 
+##                       ifelse(Date <= "2017-09-18", 2, 
+##                              ifelse(Date <= "2017-09-25", 3, 
+##                                     ifelse(Date <= "2017-10-02", 4, 
+##                                            ifelse(Date <= "2017-10-09", 5, 
+##                                                   ifelse(Date <= "2017-10-16", 6,
+##                                                          ifelse(Date <= "2017-10-23", 7,
+##                                                   0)))))))) %>%
+##  dplyr::filter(Week != 0)
+
+
+# Aggergate by week
+med_game_total_2017 <- aggregate(data_2017$game_total, list(data_2017$Week), median)
+med_1H_total_2017 <- aggregate(data_2017$first_half_total, list(data_2017$Week), median)
+med_odds_game_total_2017 <- aggregate(data_2017$pinnacle_over_game_total_only, list(data_2017$Week), median)
+med_odds_1H_total_2017 <- aggregate(data_2017$pinnacle_over_1H_total_only, list(data_2017$Week), median)
+
+# Name columns
+med_game_total_2017 <- med_game_total_2017 %>%
+  dplyr::rename(Week = Group.1, total_game_med = x)
+med_1H_total_2017 <- med_1H_total_2017 %>%
+  dplyr::rename(Week = Group.1, total_1H_med = x)
+med_odds_game_total_2017 <- med_odds_game_total_2017 %>%
+  dplyr::rename(Week = Group.1, odds_game_total_med = x)
+med_odds_1H_total_2017 <- med_odds_1H_total_2017 %>%
+  dplyr::rename(Week = Group.1, odds_1H_total_med = x)
+
+# Merge
+med_season_data_2017 <- merge(med_game_total_2017, med_odds_game_total_2017)
+med_season_data_2017 <- merge(med_season_data_2017, med_1H_total_2017)
+med_season_data_2017 <- merge(med_season_data_2017, med_odds_1H_total_2017)
+
+write.csv(med_season_data_2017, "med_season_data_2017.csv")
+```
+
+```{r Create a flat Data Frame}
+data_h <- data
+data_a <- data
+
+## Mass rename code # Don't think I need it. 
+# colnames(data_h) <- as.character(paste0("H_",colnames(data_h)))
+#  data_h <- data_h
+
+#colnames(data_a) <- as.character(paste0("A_",colnames(data_a)))
+#  data_a <- data_a
+  
+data_h <- data_h %>%
+  mutate(venue = 1)
+data_a <- data_a %>%
+  mutate(venue = 0)
+  
+colnames(data_h) <- gsub("home", "team", colnames(data_h))
+colnames(data_h) <- gsub("away", "opp", colnames(data_h))  
+
+colnames(data_a) <- gsub("home", "opp", colnames(data_a))
+colnames(data_a) <- gsub("away", "team", colnames(data_a)) 
+
+data_flat <- rbind(data_h, data_a)
+
+data_flat <- data_flat %>%
+  arrange(Date, game_uid)
+```
+
+
+
+```{r Reverse spreads and create full game team scores}
+# Create favored by columns
+data_flat <- data_flat %>%
+  mutate(bookmaker_team_1H_favored_by = bookmaker_team_1H_spread_only * -1, 
+         bookmaker_team_game_favored_by = bookmaker_team_game_spread_only * -1, 
+         pinnacle_team_1H_favored_by = pinnacle_team_1H_spread_only * -1, 
+         pinnacle_team_game_favored_by = pinnacle_team_game_spread_only * -1)
+
+data_flat$team_1Q = as.numeric(data_flat$team_1Q)
+data_flat$team_2Q = as.numeric(data_flat$team_2Q)
+data_flat$team_3Q = as.numeric(data_flat$team_3Q)
+data_flat$team_4Q = as.numeric(data_flat$team_4Q)
+
+data_flat <- data_flat %>%
+  dplyr::mutate(team_game_score = team_1Q + team_2Q + team_3Q + team_4Q)
+
+data_flat <- data_flat %>%
+  dplyr::select(game_uid, 
+                Date, 
+                team_Team, 
+                opp_Team, 
+                team_game_score, 
+                bookmaker_team_1H_favored_by, 
+                bookmaker_team_game_favored_by,
+                pinnacle_team_1H_favored_by,
+                pinnacle_team_game_favored_by,
+                bookmaker_over_1H_total_only,
+                bookmaker_over_game_total_only,
+                pinnacle_over_1H_total_only,
+                pinnacle_over_game_total_only)
+
+data_flat <- data_flat %>%
+  mutate(o5.5 = ifelse(team_game_score > 5.5, 1, 0),
+         o6.5 = ifelse(team_game_score> 6.5, 1, 0),
+         o7.5 = ifelse(team_game_score > 7.5, 1, 0), 
+         o8.5 = ifelse(team_game_score > 8.5, 1, 0), 
+         o9.5 = ifelse(team_game_score > 9.5, 1, 0), 
+         o10.5 = ifelse(team_game_score > 10.5, 1, 0), 
+         o11.5 = ifelse(team_game_score > 11.5, 1, 0), 
+         o12.5 = ifelse(team_game_score> 12.5, 1, 0), 
+         o13.5 = ifelse(team_game_score > 13.5, 1, 0), 
+         o14.5 = ifelse(team_game_score > 14.5, 1, 0), 
+         o15.5 = ifelse(team_game_score > 15.5, 1, 0), 
+         o16.5 = ifelse(team_game_score > 16.5, 1, 0), 
+         o17.5 = ifelse(team_game_score > 17.5, 1, 0), 
+         o18.5 = ifelse(team_game_score > 18.5, 1, 0), 
+         o19.5 = ifelse(team_game_score > 19.5, 1, 0), 
+         o20.5 = ifelse(team_game_score > 20.5, 1, 0),
+         o21.5 = ifelse(team_game_score > 21.5, 1, 0),
+         o22.5 = ifelse(team_game_score > 22.5, 1, 0),
+         o23.5 = ifelse(team_game_score > 23.5, 1, 0),
+         o24.5 = ifelse(team_game_score > 24.5, 1, 0),
+         o25.5 = ifelse(team_game_score > 25.5, 1, 0),
+         o26.5 = ifelse(team_game_score > 26.5, 1, 0))
+
+# colnames(data_flat)
+```
+
+
+
+```{r Linear Regression use Full game lines}
+Linear_Regression_full_game = lm(team_game_score ~ 
+                                   bookmaker_team_game_favored_by + 
+                                   bookmaker_over_game_total_only,
+                                 data = data_flat)
+
+summary(Linear_Regression_full_game)
+
+data_flat$team_avg_game_score <- predict(Linear_Regression_full_game,data_flat)
+```
+
+```{r Log Regress 5.5}
+Log_o5.5 = glm(o5.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o5.5)
+```
+
+```{r Log Regress 6.5}
+Log_o6.5 = glm(o6.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o6.5)
+```
+
+```{r Log Regress 7.5}
+Log_o7.5 = glm(o7.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o7.5)
+```
+
+```{r Log Regress 8.5}
+Log_o8.5 = glm(o8.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o8.5)
+```
+
+```{r Log Regress 9.5}
+Log_o9.5 = glm(o9.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o9.5)
+```
+
+```{r Log Regress 10.5}
+Log_o10.5 = glm(o10.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o10.5)
+```
+
+```{r Log Regress 11.5}
+Log_o11.5 = glm(o11.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o11.5)
+```
+
+```{r Log Regress 12.5}
+Log_o12.5 = glm(o12.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o12.5)
+```
+
+```{r Log Regress 13.5}
+Log_o13.5 = glm(o13.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o13.5)
+```
+
+```{r Log Regress 14.5}
+Log_o14.5 = glm(o14.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o14.5)
+```
+
+```{r Log Regress 15.5}
+Log_o15.5 = glm(o15.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o15.5)
+```
+
+```{r Log Regress 16.5}
+Log_o16.5 = glm(o16.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o16.5)
+```
+
+```{r Log Regress 17.5}
+Log_o17.5 = glm(o17.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o17.5)
+```
+
+```{r Log Regress 18.5}
+Log_o18.5 = glm(o18.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o18.5)
+```
+
+```{r Log Regress 19.5}
+Log_o19.5 = glm(o19.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o19.5)
+```
+
+```{r Log Regress 20.5}
+Log_o20.5 = glm(o20.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o20.5)
+```
+
+```{r Log Regress 21.5}
+Log_o21.5 = glm(o21.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o21.5)
+```
+
+```{r Log Regress 22.5}
+Log_o22.5 = glm(o22.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o22.5)
+```
+
+```{r Log Regress 23.5}
+Log_o23.5 = glm(o23.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o23.5)
+```
+
+```{r Log Regress 24.5}
+Log_o24.5 = glm(o24.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o24.5)
+```
+
+```{r Log Regress 25.5}
+Log_o25.5 = glm(o25.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o25.5)
+```
+
+```{r Log Regress 26.5}
+Log_o26.5 = glm(o26.5 ~
+                 team_avg_game_score, 
+               data = data_flat, family = binomial)
+
+summary(Log_o26.5)
+```
