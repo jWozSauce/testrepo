@@ -108,7 +108,10 @@ def goalscorer_props(
     expected minutes feed directly into every player's price.
     """
     s = players[players["team"] == team].copy()
-    weight = s["xg90"] * (s["exp_minutes"] / 90.0)
+    # props are about who actually scores, so weight by finishing (own-shot xG)
+    # when available; fall back to the impact rating otherwise.
+    finishing = s["npxg90"] if "npxg90" in s.columns else s["xg90"]
+    weight = finishing * (s["exp_minutes"] / 90.0)
     total = weight.sum()
     if total <= 0:
         s["exp_goals"] = 0.0

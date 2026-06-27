@@ -5,11 +5,16 @@ tournaments, including the FIFA World Cup 2018 & 2022, the Euros and Copa
 America: https://github.com/statsbomb/open-data
 
 This module turns that raw data into the schema the model expects
-(team, player, position, xg90, def90, exp_minutes):
+(team, player, position, xg90, npxg90, def90, exp_minutes):
 
-  * xg90  - REAL: non-penalty expected goals + expected assists per 90,
-            summed from per-shot StatsBomb xG (xA credited to the key-pass
-            player using each assisted shot's xG).
+  * xg90  - REAL IMPACT: xGChain per 90 -- the total xG of every possession the
+            player was involved in. Unlike direct npxG+xAG (which scores
+            defenders and deep playmakers at ~0), xGChain credits everyone who
+            builds an attack, so it measures a player's contribution to team
+            expected goals. (xGBuildup, which also excludes the shot and the
+            assist, is computed too and exposed as xgbuildup90.)
+  * npxg90 - REAL FINISHING: non-penalty xG from the player's own shots per 90.
+            Used for goalscorer props, where only the shooter's own xG matters.
   * def90 - HEURISTIC: per-90 volume of defensive actions (tackles, blocks,
             interceptions, clearances, recoveries, pressures), z-scored within
             position and mapped to a goals-prevented-style scale. Public event
@@ -111,21 +116,34 @@ def build_players(
         lineups = sb.lineups(mid)
         minutes = _match_minutes(lineups)
 
-        shots = ev[ev["type"] == "Shot"].copy()
+        xg_col = "shot_statsbomb_xg"
+        all_shots = ev[ev["type"] == "Shot"].copy()
+        shots = all_shots
         if "shot_type" in shots.columns:
             shots = shots[shots["shot_type"] != "Penalty"]
-        xg_col = "shot_statsbomb_xg"
 
-        # xA: credit each assisted shot's xG to its key-pass player
-        passer = dict(zip(ev["id"], ev["player"]))
-        xa: dict = {}
-        if "shot_key_pass_id" in shots.columns:
-            for _, s in shots.dropna(subset=["shot_key_pass_id"]).iterrows():
-                pid = passer.get(s["shot_key_pass_id"])
-                if pid:
-                    xa[pid] = xa.get(pid, 0.0) + float(s[xg_col] or 0.0)
-
+        # finishing: a player's own non-penalty shot xG
         npxg = shots.groupby("player")[xg_col].sum().to_dict()
+
+        # xGChain / xGBuildup: credit every player involved in a possession with
+        # the xG that possession produced.
+        chain: dict = {}
+        buildup: dict = {}
+        if "possession" in ev.columns and len(all_shots):
+            poss_val = all_shots.groupby("possession")[xg_col].sum()
+            kp_ids = set(all_shots["shot_key_pass_id"].dropna()) \
+                if "shot_key_pass_id" in all_shots.columns else set()
+            for poss, val in poss_val.items():
+                if not val or val <= 0:
+                    continue
+                pe = ev[ev["possession"] == poss]
+                team = pe["possession_team"].iloc[0]
+                inv = pe[pe["team"] == team]
+                for p in inv["player"].dropna().unique():
+                    chain[p] = chain.get(p, 0.0) + float(val)
+                bu = inv[(inv["type"] != "Shot") & (~inv["id"].isin(kp_ids))]
+                for p in bu["player"].dropna().unique():
+                    buildup[p] = buildup.get(p, 0.0) + float(val)
 
         defs = ev[ev["type"].isin(DEF_ACTION_WEIGHTS)]
         def_val: dict = {}
@@ -145,11 +163,12 @@ def build_players(
                 continue
             team_matches.setdefault(team, set()).add(mid)
             key = (player, team)
-            a = acc.setdefault(key, {"min": 0.0, "npxg": 0.0, "xa": 0.0,
-                                     "def": 0.0, "grp": {}})
+            a = acc.setdefault(key, {"min": 0.0, "npxg": 0.0, "chain": 0.0,
+                                     "buildup": 0.0, "def": 0.0, "grp": {}})
             a["min"] += mins
             a["npxg"] += float(npxg.get(player, 0.0))
-            a["xa"] += float(xa.get(player, 0.0))
+            a["chain"] += float(chain.get(player, 0.0))
+            a["buildup"] += float(buildup.get(player, 0.0))
             a["def"] += float(def_val.get(player, 0.0))
             a["grp"][grp] = a["grp"].get(grp, 0.0) + mins
         print(f"  processed {n}/{len(match_ids)} matches", end="\r")
@@ -163,7 +182,9 @@ def build_players(
         grp = max(a["grp"], key=a["grp"].get)
         rows.append({
             "team": team, "player": player, "position": grp,
-            "xg90": round((a["npxg"] + a["xa"]) * per90, 3),
+            "xg90": round(a["chain"] * per90, 3),        # impact (xGChain/90)
+            "xgbuildup90": round(a["buildup"] * per90, 3),
+            "npxg90": round(a["npxg"] * per90, 3),       # finishing for props
             "def_rate90": (a["def"]) * per90,
             "minutes_total": a["min"],
             "team_matches": len(team_matches[team]),
@@ -186,7 +207,8 @@ def build_players(
     team_total = df.groupby("team")["exp_minutes"].transform("sum")
     df["exp_minutes"] = (df["exp_minutes"] * 990.0 / team_total).round(1)
 
-    return df[["team", "player", "position", "xg90", "def90", "exp_minutes"]] \
+    return df[["team", "player", "position", "xg90", "xgbuildup90", "npxg90",
+               "def90", "exp_minutes"]] \
         .sort_values(["team", "exp_minutes"], ascending=[True, False]) \
         .reset_index(drop=True)
 

@@ -108,6 +108,7 @@ def _allocate_minutes(pool: pd.DataFrame) -> pd.Series:
 def build_players(
     standard_paths: list[str],
     defense_paths: list[str] | None = None,
+    creation_paths: list[str] | None = None,
     roster_path: str | None = None,
     min_club_minutes: int = 450,
     max_squad: int = 26,
@@ -129,7 +130,25 @@ def build_players(
     df = df[df["team"] != "Unknown"]
 
     nineties = (df["club_min"] / 90.0).clip(lower=0.1)
+    # finishing (own-shot npxG per 90) -> goalscorer props
+    df["npxg90"] = (df["npxg"] / nineties).round(3)
+    # impact rating (xg90): prefer a Goal & Shot Creation export (SCA90, which
+    # credits buildup, not just the finish); else fall back to direct npxG+xAG.
     df["xg90"] = ((df["npxg"] + df["xag"]) / nineties).round(3)
+    if creation_paths:
+        cre = pd.concat([_read_fbref_csv(p) for p in creation_paths], ignore_index=True)
+        sca = pd.DataFrame({
+            "player": cre["Player"].str.strip(),
+            "sca90": _num(cre.get("SCA90", 0)),
+        }).drop_duplicates("player")
+        df = df.merge(sca, on="player", how="left")
+        # SCA90 is in action units; scale it to sit on the same footing as the
+        # direct xg90 it replaces, so the league-average anchor still holds.
+        have = df["sca90"].notna() & (df["sca90"] > 0)
+        if have.any():
+            scale = df.loc[have, "xg90"].mean() / df.loc[have, "sca90"].mean()
+            df.loc[have, "xg90"] = (df.loc[have, "sca90"] * scale).round(3)
+        df = df.drop(columns=["sca90"])
 
     # def90: from a defensive-actions export if provided, else a position default
     df["def90"] = df["position"].map(DEF_BASE)
@@ -173,7 +192,8 @@ def build_players(
         out.append(pool)
     result = pd.concat(out, ignore_index=True)
 
-    return result[["team", "player", "position", "xg90", "def90", "exp_minutes"]] \
+    return result[["team", "player", "position", "xg90", "npxg90", "def90",
+                   "exp_minutes"]] \
         .sort_values(["team", "exp_minutes"], ascending=[True, False]) \
         .reset_index(drop=True)
 
@@ -182,6 +202,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Build players.csv from FBref CSV exports")
     ap.add_argument("--standard", nargs="*", help="Player Standard Stats CSV export(s)")
     ap.add_argument("--defense", nargs="*", default=None, help="Defensive Actions CSV export(s)")
+    ap.add_argument("--creation", nargs="*", default=None,
+                    help="Goal & Shot Creation CSV export(s) -> SCA90 impact rating")
     ap.add_argument("--roster", default=None, help="optional roster CSV (team, player)")
     ap.add_argument("--min-minutes", type=int, default=450, dest="min_minutes")
     ap.add_argument("--out", default=os.path.abspath(os.path.join(DATA_DIR, "players.csv")))
@@ -196,12 +218,19 @@ def main() -> None:
     defense = args.defense
     if defense is None:
         defense = sorted(glob.glob(os.path.join(FBREF_DIR, "*defens*.csv"))) or None
+    creation = args.creation
+    if creation is None:
+        creation = sorted(glob.glob(os.path.join(FBREF_DIR, "*creation*.csv"))
+                          + glob.glob(os.path.join(FBREF_DIR, "*gca*.csv"))) or None
 
-    df = build_players(standard, defense, args.roster, args.min_minutes)
+    df = build_players(standard, defense, creation, args.roster, args.min_minutes)
     df.to_csv(args.out, index=False)
     print(f"wrote {len(df)} players across {df['team'].nunique()} teams -> {args.out}")
     if defense is None:
         print("note: no defensive-actions export found; def90 uses position defaults.")
+    if creation is None:
+        print("note: no Goal & Shot Creation export found; xg90 uses direct npxG+xAG "
+              "(not an impact metric). Export that table for an SCA-based impact rating.")
 
 
 if __name__ == "__main__":

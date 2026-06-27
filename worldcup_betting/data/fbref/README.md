@@ -11,8 +11,14 @@ Export from FBref in your browser (no scraping needed):
 
 | File (suggested name) | FBref table | Used for |
 |---|---|---|
-| `*standard*.csv` | Player **Standard Stats** | `xg90` (npxG + xAG per 90) — **required** |
+| `*standard*.csv` | Player **Standard Stats** | finishing `npxg90` + fallback `xg90` — **required** |
+| `*creation*.csv` | Player **Goal & Shot Creation** | impact `xg90` from SCA90 (credits buildup) — recommended |
 | `*defense*.csv`  | Player **Defensive Actions** | real `def90` (Tkl/Int/Blocks/Clr) — optional |
+
+Without the creation export, `xg90` falls back to direct npxG+xAG, which
+under-credits midfielders and defenders. The Goal & Shot Creation table's SCA90
+is FBref's closest impact metric (it credits the buildup to a shot, not just the
+finish), so include it for an impact-based rating.
 
 You can drop multiple `*standard*.csv` files (e.g. one per league) to cover
 players outside the Big 5. The loader auto-discovers files matching the name

@@ -17,13 +17,17 @@ player ratings ──► team strength ──► match model ──► markets �
 ```
 
 1. **Ratings → team strength** (`worldcup_betting/ratings.py`).
-   Each player has an attacking rating `xg90` (expected goals + assists per 90),
-   a defensive rating `def90` (goals prevented per 90), and `exp_minutes` (how
-   much of the match they're expected to play). A player's contribution is his
-   per-90 rating × minutes share, summed over the squad. Expected minutes sum to
-   990 (11 × 90) per team, so the minutes-weighted xG aggregates are physically
-   consistent. Rule a player out and his minutes redistribute to the bench,
-   automatically lowering the team's numbers.
+   Each player has an attacking **impact** rating `xg90`, a defensive rating
+   `def90` (goals prevented per 90), and `exp_minutes` (how much of the match
+   they're expected to play). A player's contribution is his per-90 rating ×
+   minutes share, summed over the squad; rule a player out and his minutes
+   redistribute to the bench, lowering the team's numbers.
+
+   `xg90` is an **impact** metric, not direct output: in the bundled real data
+   it's **xGChain per 90** (the xG of every possession the player is involved
+   in), so midfielders and defenders who build attacks are valued — direct
+   npxG+xAG would score them ~0. A separate `npxg90` (own-shot xG per 90) drives
+   the goalscorer props, where only the finisher's xG matters.
 
 2. **Match model** (`match_model.py`). Opponent-adjusted expected goals feed a
    **Dixon–Coles bivariate Poisson** to produce a full scoreline probability
@@ -75,8 +79,13 @@ data](https://github.com/statsbomb/open-data), which publishes full event +
 lineup data (no API key) for the **World Cup 2018 & 2022**, the **Euros**,
 **Copa América** and the **Women's World Cup**. The loader computes, per player:
 
-- `xg90` — **real**: non-penalty StatsBomb xG + xA per 90 (xA credited to the
-  key-pass player using each assisted shot's xG).
+- `xg90` — **real impact**: **xGChain per 90** — the total xG of every
+  possession the player is involved in. This credits buildup play, so deep
+  midfielders and defenders get the value direct npxG+xAG would miss.
+  (`xgbuildup90`, which also strips out the shot and the assist, is included
+  too.)
+- `npxg90` — **real finishing**: the player's own non-penalty shot xG per 90,
+  used for goalscorer props.
 - `exp_minutes` — **real usage**: average minutes per team match, renormalised
   so each squad sums to 990.
 - `def90` — **heuristic**: per-90 volume of defensive actions (tackles, blocks,
@@ -110,10 +119,17 @@ Drop the exports in `worldcup_betting/data/fbref/` and run:
 python -m worldcup_betting.data_sources.fbref_csv     # auto-discovers the CSVs
 ```
 
-It groups players into national teams by FBref's Nation column, derives `xg90`
-from npxG + xAG per 90, computes a real `def90` if you include a Defensive
-Actions export, and allocates expected minutes via a depth chart (club minutes
-rank who starts). Pass `--roster roster.csv` (`team, player`) for official squads.
+It groups players into national teams by FBref's Nation column, computes a real
+`def90` if you include a Defensive Actions export, and allocates expected minutes
+via a depth chart (club minutes rank who starts). Pass `--roster roster.csv`
+(`team, player`) for official squads.
+
+**Impact vs. direct output on FBref.** FBref has no xGChain/On-Ball-Value, so by
+default `xg90` falls back to direct npxG+xAG (which under-credits deep players).
+For an impact-style rating, also export the **Goal & Shot Creation** table — the
+loader will use **SCA90** (shot-creating actions, which credit the buildup) as
+`xg90`, and keep npxG for the props. It's the closest impact proxy FBref offers;
+for true xGChain you'd use Understat or compute On-Ball-Value from event data.
 
 ### Other free sources (and when to use them)
 
@@ -131,7 +147,10 @@ write them into the same `players.csv` columns. The model code doesn't change.
 ### Replace the data yourself
 
 Any `players.csv` with columns `team, player, position, xg90, def90,
-exp_minutes` works (keep each squad's `exp_minutes` summing to ~990).
+exp_minutes` works (keep each squad's `exp_minutes` summing to ~990). `xg90` is
+the attacking **impact** rating that drives team strength; add an optional
+`npxg90` column (own-shot finishing) to price goalscorer props off finishing
+rather than impact.
 
 ### Market odds
 

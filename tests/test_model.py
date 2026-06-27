@@ -48,6 +48,24 @@ def test_props_use_minutes_and_xg():
     assert (props["two_plus_prob"] <= props["anytime_prob"] + 1e-9).all()
 
 
+def test_impact_metric_credits_non_forwards():
+    # xg90 is an impact rating (xGChain), so midfielders/defenders should carry
+    # real value -- not the ~0 that direct npxG would give them.
+    players = wb.load_players()
+    if "npxg90" not in players.columns:
+        return  # synthetic data has no separate impact/finishing split
+    mids = players[players["position"] == "MID"]
+    # a meaningful share of midfielders out-impact their own finishing number
+    assert (mids["xg90"] > mids["npxg90"]).mean() > 0.5
+
+
+def test_props_are_finishing_based():
+    # goalscorer props use npxg90 when present, so top scorers should be forwards
+    model = wb.load_model()
+    props = wb.price_match(model, "Argentina", "France")["props_home"]
+    assert props.iloc[0]["position"] == "FWD"
+
+
 def test_edge_math():
     # fair odds: model 50%, price 2.10 -> +5% EV, positive Kelly
     assert abs(expected_value(0.5, 2.10) - 0.05) < 1e-9
