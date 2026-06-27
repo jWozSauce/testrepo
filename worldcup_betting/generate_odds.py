@@ -21,7 +21,7 @@ FIXTURES = [
     ("Brazil", "Switzerland"),
     ("France", "Denmark"),
     ("Argentina", "Mexico"),
-    ("England", "USA"),
+    ("England", "United States"),
     ("Spain", "Japan"),
 ]
 

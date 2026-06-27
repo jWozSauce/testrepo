@@ -38,9 +38,11 @@ player ratings ──► team strength ──► match model ──► markets �
    expected value → Kelly stake. Anything beating its price by your EV threshold
    is flagged.
 
-> The bundled ratings are **synthetic but tier-calibrated** so it runs offline
-> immediately and strong teams beat weak ones by believable margins. Swap in real
-> numbers any time (see below) — the model code doesn't change.
+> **The bundled `players.csv` is REAL data** — every player's `xg90` is their
+> non-penalty xG + xA per 90 and `exp_minutes` is their actual usage, computed
+> from **StatsBomb's free World Cup 2022 open data** (see *Data* below). Run
+> `python -m worldcup_betting.generate_data` if you'd rather drop back to the
+> synthetic tier-calibrated dataset for offline experiments.
 
 ## Run it
 
@@ -64,17 +66,62 @@ python -m worldcup_betting.cli edges                 # scan bundled sample odds
    repo and `app.py`.
 3. You get a public URL. Open it on your phone — Streamlit is mobile-responsive.
 
-## Use real data
+## Data
 
-- **Player ratings:** replace `worldcup_betting/data/players.csv` with your own.
-  Required columns: `team, player, position, xg90, def90, exp_minutes`
-  (keep each squad's `exp_minutes` summing to ~990). Regenerate the sample with
-  `python -m worldcup_betting.generate_data`. Good sources: FBref / Opta per-90
-  numbers, FIFA ratings mapped to xG, or your own rating model.
-- **Market odds:** in the app's *Edge finder* tab, upload a CSV with columns
-  `fixture, market, selection, market_odds` (decimal). The bundled
-  `data/odds_sample.csv` shows the format; regenerate with
-  `python -m worldcup_betting.generate_odds`.
+### Real player ratings (bundled, from StatsBomb open data)
+
+The shipped `players.csv` is built from [StatsBomb's free open
+data](https://github.com/statsbomb/open-data), which publishes full event +
+lineup data (no API key) for the **World Cup 2018 & 2022**, the **Euros**,
+**Copa América** and the **Women's World Cup**. The loader computes, per player:
+
+- `xg90` — **real**: non-penalty StatsBomb xG + xA per 90 (xA credited to the
+  key-pass player using each assisted shot's xG).
+- `exp_minutes` — **real usage**: average minutes per team match, renormalised
+  so each squad sums to 990.
+- `def90` — **heuristic**: per-90 volume of defensive actions (tackles, blocks,
+  interceptions, clearances, recoveries, pressures), z-scored within position.
+  Public event data has no true "goals prevented" metric — swap in your own if
+  you have one.
+
+Rebuild it for any covered tournament:
+
+```bash
+pip install statsbombpy
+python -m worldcup_betting.data_sources.statsbomb --competition 43 --season 106  # WC 2022
+python -m worldcup_betting.data_sources.statsbomb --competition 43 --season 3    # WC 2018
+# competition_id/season_id come from the StatsBomb competitions.json
+```
+
+> **Caveat — small samples.** A single tournament is only 3–7 matches per team,
+> so per-90 rates are noisy and an eliminated side that generated lots of xG can
+> look inflated. For stabler ratings, pool several tournaments or use full
+> club-season data (below) and blend toward a prior.
+
+### Other free sources (and when to use them)
+
+| Source | What you get | Best for | Access |
+|---|---|---|---|
+| **StatsBomb Open Data** | Event-level xG, lineups, minutes | World Cup / Euro / Copa squads (bundled here) | `statsbombpy`, free |
+| **FBref** (Opta) | Per-90 xG/xA, defensive actions, minutes — all top leagues + internationals, full seasons | **An upcoming tournament**: map each national squad to its current club-season numbers (big sample) | [`soccerdata`](https://soccerdata.readthedocs.io) / [`worldfootballR`](https://jaseziv.github.io/worldfootballR/), free |
+| **Understat** | Shot-level xG, xA, npxG | Club football (top-5 European leagues only — no national teams) | `soccerdata` / `understatapi`, free |
+| **SoFIFA (FIFA ratings)** | Overall/attribute ratings (not xG) | A quality prior for minutes/selection or as a fallback | `soccerdata`, free |
+
+To target a **future** World Cup, the realistic pipeline is: take each squad's
+players → pull their **current club-season** per-90 xG/xA + minutes from FBref →
+write them into the same `players.csv` columns. The model code doesn't change.
+
+### Replace the data yourself
+
+Any `players.csv` with columns `team, player, position, xg90, def90,
+exp_minutes` works (keep each squad's `exp_minutes` summing to ~990).
+
+### Market odds
+
+In the app's *Edge finder* tab, upload a CSV with columns `fixture, market,
+selection, market_odds` (decimal). The bundled `data/odds_sample.csv` shows the
+format; regenerate with `python -m worldcup_betting.generate_odds`. For live
+odds, [The Odds API](https://the-odds-api.com) has a free tier.
 
 ## Tests
 
@@ -92,8 +139,9 @@ worldcup_betting/
   markets.py                    price 1X2 / totals / AH / BTTS / scores / props
   edges.py                      devig, EV, Kelly, edge scan
   cli.py                        command-line interface
-  generate_data.py              build the sample player ratings
+  generate_data.py              build the SYNTHETIC fallback player ratings
   generate_odds.py              build the sample bookmaker odds
+  data_sources/statsbomb.py     build REAL ratings from StatsBomb open data
   data/players.csv, odds_sample.csv
 tests/test_model.py
 ```

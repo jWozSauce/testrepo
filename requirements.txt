@@ -1,3 +1,7 @@
 numpy>=1.26
 pandas>=2.0
 streamlit>=1.30
+
+# Only needed to REBUILD real ratings from StatsBomb open data
+# (worldcup_betting/data_sources/statsbomb.py). The app runs without it.
+statsbombpy>=1.11
