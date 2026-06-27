@@ -98,6 +98,23 @@ python -m worldcup_betting.data_sources.statsbomb --competition 43 --season 3   
 > look inflated. For stabler ratings, pool several tournaments or use full
 > club-season data (below) and blend toward a prior.
 
+### FBref club-season form (best for an upcoming tournament)
+
+FBref's per-90 xG/xA over a full club season is a much bigger sample than one
+tournament. FBref is Cloudflare-protected (hard to scrape), but you can **export
+any table to CSV from your browser** — see
+[`worldcup_betting/data/fbref/README.md`](worldcup_betting/data/fbref/README.md).
+Drop the exports in `worldcup_betting/data/fbref/` and run:
+
+```bash
+python -m worldcup_betting.data_sources.fbref_csv     # auto-discovers the CSVs
+```
+
+It groups players into national teams by FBref's Nation column, derives `xg90`
+from npxG + xAG per 90, computes a real `def90` if you include a Defensive
+Actions export, and allocates expected minutes via a depth chart (club minutes
+rank who starts). Pass `--roster roster.csv` (`team, player`) for official squads.
+
 ### Other free sources (and when to use them)
 
 | Source | What you get | Best for | Access |
@@ -142,6 +159,8 @@ worldcup_betting/
   generate_data.py              build the SYNTHETIC fallback player ratings
   generate_odds.py              build the sample bookmaker odds
   data_sources/statsbomb.py     build REAL ratings from StatsBomb open data
+  data_sources/fbref_csv.py     build REAL ratings from FBref CSV exports
+  data/fbref/                   drop your FBref CSV exports here
   data/players.csv, odds_sample.csv
 tests/test_model.py
 ```
