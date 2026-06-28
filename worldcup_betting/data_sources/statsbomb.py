@@ -36,6 +36,8 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from ._decay import half_life_weight
+
 warnings.filterwarnings("ignore")
 
 # StatsBomb detailed position -> coarse group used by the model
@@ -99,19 +101,48 @@ def _match_minutes(lineups: dict) -> dict:
 
 
 def build_players(
-    competition_id: int = 43, season_id: int = 106, max_matches: int | None = None
+    windows: list[tuple[int, int]] | None = None,
+    competition_id: int = 43,
+    season_id: int = 106,
+    half_life_days: float | None = None,
+    as_of: str | None = None,
+    max_matches: int | None = None,
 ) -> pd.DataFrame:
+    """Aggregate player ratings, optionally across several tournaments and with
+    recency decay.
+
+    windows        list of (competition_id, season_id) to pool (default: the
+                   single competition_id/season_id below).
+    half_life_days exponential decay half-life in days; a match this many days
+                   before the reference date counts half as much. None = equal
+                   weighting.
+    as_of          reference date 'YYYY-MM-DD' (default: the most recent match).
+    """
     from statsbombpy import sb
 
-    matches = sb.matches(competition_id=competition_id, season_id=season_id)
-    match_ids = matches["match_id"].astype(int).tolist()
+    if windows is None:
+        windows = [(competition_id, season_id)]
+
+    # collect (match_id, date) across all pooled windows
+    matchlist: list[tuple[int, "pd.Timestamp"]] = []
+    for comp, seas in windows:
+        m = sb.matches(competition_id=comp, season_id=seas)
+        for _, r in m.iterrows():
+            matchlist.append((int(r["match_id"]), pd.to_datetime(r["match_date"])))
+    matchlist.sort(key=lambda x: x[1])
     if max_matches:
-        match_ids = match_ids[:max_matches]
+        matchlist = matchlist[-max_matches:]
+
+    ref = pd.to_datetime(as_of) if as_of else max(d for _, d in matchlist)
+
+    def match_weight(date: "pd.Timestamp") -> float:
+        return half_life_weight((ref - date).days, half_life_days)
 
     acc: dict[tuple, dict] = {}        # (player, team) -> accumulators
-    team_matches: dict[str, set] = {}  # team -> set(match_id)
+    team_weight: dict[str, float] = {}  # team -> sum of match recency weights
 
-    for n, mid in enumerate(match_ids, 1):
+    for n, (mid, mdate) in enumerate(matchlist, 1):
+        w = match_weight(mdate)
         ev = sb.events(mid)
         lineups = sb.lineups(mid)
         minutes = _match_minutes(lineups)
@@ -157,28 +188,34 @@ def build_players(
             for nm in df["player_name"]:
                 p2team[nm] = team
 
+        seen_teams = set()
         for player, (mins, grp) in minutes.items():
             team = p2team.get(player)
             if team is None:
                 continue
-            team_matches.setdefault(team, set()).add(mid)
+            if team not in seen_teams:
+                team_weight[team] = team_weight.get(team, 0.0) + w
+                seen_teams.add(team)
             key = (player, team)
-            a = acc.setdefault(key, {"min": 0.0, "npxg": 0.0, "chain": 0.0,
-                                     "buildup": 0.0, "def": 0.0, "grp": {}})
-            a["min"] += mins
-            a["npxg"] += float(npxg.get(player, 0.0))
-            a["chain"] += float(chain.get(player, 0.0))
-            a["buildup"] += float(buildup.get(player, 0.0))
-            a["def"] += float(def_val.get(player, 0.0))
+            a = acc.setdefault(key, {"wmin": 0.0, "raw_min": 0.0, "npxg": 0.0,
+                                     "chain": 0.0, "buildup": 0.0, "def": 0.0,
+                                     "grp": {}})
+            # all per-match contributions are scaled by the match's recency weight
+            a["wmin"] += w * mins
+            a["raw_min"] += mins
+            a["npxg"] += w * float(npxg.get(player, 0.0))
+            a["chain"] += w * float(chain.get(player, 0.0))
+            a["buildup"] += w * float(buildup.get(player, 0.0))
+            a["def"] += w * float(def_val.get(player, 0.0))
             a["grp"][grp] = a["grp"].get(grp, 0.0) + mins
-        print(f"  processed {n}/{len(match_ids)} matches", end="\r")
+        print(f"  processed {n}/{len(matchlist)} matches", end="\r")
     print()
 
     rows = []
     for (player, team), a in acc.items():
-        if a["min"] < 20:  # drop cameo-only players
+        if a["raw_min"] < 20 or a["wmin"] <= 0:  # drop cameo-only players
             continue
-        per90 = 90.0 / a["min"]
+        per90 = 90.0 / a["wmin"]  # decay-weighted minutes -> decay-weighted rates
         grp = max(a["grp"], key=a["grp"].get)
         rows.append({
             "team": team, "player": player, "position": grp,
@@ -186,8 +223,8 @@ def build_players(
             "xgbuildup90": round(a["buildup"] * per90, 3),
             "npxg90": round(a["npxg"] * per90, 3),       # finishing for props
             "def_rate90": (a["def"]) * per90,
-            "minutes_total": a["min"],
-            "team_matches": len(team_matches[team]),
+            # recency-weighted average minutes per match this player featured in
+            "exp_minutes_raw": a["wmin"] / team_weight[team],
         })
     df = pd.DataFrame(rows)
 
@@ -202,10 +239,9 @@ def build_players(
         df.loc[m, "def90"] = (base * (1 + 0.30 * z)).clip(lower=0.0)
     df["def90"] = df["def90"].round(3)
 
-    # exp_minutes: average minutes per team match, renormalised to 990 / squad
-    df["exp_minutes"] = df["minutes_total"] / df["team_matches"]
-    team_total = df.groupby("team")["exp_minutes"].transform("sum")
-    df["exp_minutes"] = (df["exp_minutes"] * 990.0 / team_total).round(1)
+    # exp_minutes: recency-weighted average minutes per match, renorm to 990
+    team_total = df.groupby("team")["exp_minutes_raw"].transform("sum")
+    df["exp_minutes"] = (df["exp_minutes_raw"] * 990.0 / team_total).round(1)
 
     return df[["team", "player", "position", "xg90", "xgbuildup90", "npxg90",
                "def90", "exp_minutes"]] \
@@ -215,13 +251,24 @@ def build_players(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build players.csv from StatsBomb open data")
+    ap.add_argument("--seasons", nargs="*", default=None,
+                    help="pool several windows as comp:season (e.g. 43:106 223:282 55:282)")
     ap.add_argument("--competition", type=int, default=43, help="competition_id (43 = World Cup)")
     ap.add_argument("--season", type=int, default=106, help="season_id (106 = 2022, 3 = 2018)")
+    ap.add_argument("--half-life-days", type=float, default=None, dest="half_life_days",
+                    help="recency decay half-life in days (omit = equal weighting)")
+    ap.add_argument("--as-of", default=None, dest="as_of", help="reference date YYYY-MM-DD")
     ap.add_argument("--max-matches", type=int, default=None)
     ap.add_argument("--out", default=os.path.abspath(DATA_PATH))
     args = ap.parse_args()
 
-    df = build_players(args.competition, args.season, args.max_matches)
+    windows = None
+    if args.seasons:
+        windows = [tuple(int(x) for x in s.split(":")) for s in args.seasons]
+
+    df = build_players(windows=windows, competition_id=args.competition,
+                       season_id=args.season, half_life_days=args.half_life_days,
+                       as_of=args.as_of, max_matches=args.max_matches)
     df.to_csv(args.out, index=False)
     print(f"wrote {len(df)} real players across {df['team'].nunique()} teams -> {args.out}")
 
