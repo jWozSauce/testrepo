@@ -109,7 +109,7 @@ _SYN = {
     "drr": ["deep_route_running"],
     "route_running": ["route_running"],
     "tas": ["throw_accuracy_short", "short_throw_accuracy"],
-    "tam": ["throw_accuracy_mid", "medium_throw_accuracy"],
+    "tam": ["throw_accuracy_mid", "throw_accuracy_middle", "medium_throw_accuracy"],
     "tad": ["throw_accuracy_deep", "deep_throw_accuracy"],
     "throw_accuracy": ["throw_accuracy"],
     "m_age": ["age"],
