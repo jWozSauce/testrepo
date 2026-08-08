@@ -68,7 +68,12 @@ def load_rosters(seasons: list[int]) -> pd.DataFrame:
         keep = ["season", "player_id", "player_name", "position", "team",
                 "age", "years_exp", "entry_year", "rookie_year", "draft_number"]
         keep = [c for c in keep if c in r.columns]
-        return r[keep].copy()
+        r = r[keep].copy()
+        # some seasons store these as mixed object dtype -> coerce so caching/modeling is clean
+        for c in ["age", "years_exp", "entry_year", "rookie_year", "draft_number"]:
+            if c in r.columns:
+                r[c] = pd.to_numeric(r[c], errors="coerce")
+        return r
 
     tag = f"rosters_{min(seasons)}_{max(seasons)}.parquet"
     return _cache(tag, build)
