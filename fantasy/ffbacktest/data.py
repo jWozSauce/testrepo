@@ -44,16 +44,43 @@ def _cache(name: str, builder):
     return df
 
 
-def load_weekly(seasons: list[int]) -> pd.DataFrame:
-    """Regular-season weekly stat lines for the given seasons (cached)."""
-    import nfl_data_py as nfl
+# nfl_data_py 0.3.3 points at the retired player_stats release. Recent seasons live
+# under the renamed nflverse release, with a few column renames.
+_NFLVERSE_WEEKLY = ("https://github.com/nflverse/nflverse-data/releases/download/"
+                    "stats_player/stats_player_week_{0}.parquet")
+_WEEKLY_RENAME = {"team": "recent_team",
+                  "passing_interceptions": "interceptions",
+                  "sacks_suffered": "sacks"}
+_WEEKLY_ID_COLS = ["player_id", "player_display_name", "player_name", "position",
+                   "season", "week", "season_type", "recent_team", "opponent_team"]
 
+
+def _weekly_year(year: int) -> pd.DataFrame:
+    """One season of weekly stats: prefer nfl_data_py, fall back to the current
+    nflverse release for seasons the installed library can't reach (e.g. 2025+)."""
+    import nfl_data_py as nfl
+    try:
+        return nfl.import_weekly_data([year])
+    except Exception:
+        df = pd.read_parquet(_NFLVERSE_WEEKLY.format(year))
+        return df.rename(columns={k: v for k, v in _WEEKLY_RENAME.items()
+                                  if k in df.columns and v not in df.columns})
+
+
+def load_weekly(seasons: list[int]) -> pd.DataFrame:
+    """Regular-season weekly stat lines for the given seasons (cached).
+
+    Raises if a season is unavailable from BOTH sources, so callers can probe
+    availability with a try/except.
+    """
     def build():
-        w = nfl.import_weekly_data(list(seasons))
+        frames = [_weekly_year(y) for y in seasons]
+        w = pd.concat(frames, ignore_index=True)
         w = w[w["season_type"] == "REG"].copy()
-        # half-PPR per weekly line
         w["half_ppr"] = w["fantasy_points"].fillna(0) + 0.5 * w["receptions"].fillna(0)
-        return w
+        # keep a stable column subset so old/new schemas cache consistently
+        keep = [c for c in _WEEKLY_ID_COLS + _SUM_COLS + _MEAN_COLS if c in w.columns]
+        return w[keep + ["half_ppr"]]
 
     tag = f"weekly_{min(seasons)}_{max(seasons)}.parquet"
     return _cache(tag, build)
