@@ -155,11 +155,19 @@ def _extract(path: str) -> pd.DataFrame | None:
         s = _pick(cols, key)
         return pd.to_numeric(s, errors="coerce") if s is not None else None
 
+    def first_col(*names):
+        for n in names:
+            if n in cols:
+                return cols[n]
+        return None
+
     out = pd.DataFrame({
         "season": season,
         "name_key": name.map(normalize_name),
-        "madden_team": cols.get("team"),
-        "madden_position": cols.get("position"),
+        # team/position headers vary: "Team", "team/label", "position/shortLabel", ...
+        "madden_team": first_col("team", "team_label", "team_name"),
+        "madden_position": first_col("position", "position_short_label",
+                                     "position_label", "position_name"),
     })
 
     # direct pass-through attributes
