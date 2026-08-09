@@ -124,16 +124,24 @@ def _pick(cols: dict, key: str):
     return None
 
 
-def load_one(path: str) -> pd.DataFrame | None:
-    season = _season_from_filename(path)
-    if season is None:
-        return None
+def _extract(path: str) -> pd.DataFrame | None:
     raw = pd.read_csv(path) if path.lower().endswith(".csv") else pd.read_excel(path)
     cols = {}
     for c in raw.columns:
         k = _clean_key(c)
         if k and k not in cols:      # skip /diff cols; keep first on collision
             cols[k] = raw[c]
+
+    # season, per row: prefer a "Madden_Year" column (game number + 2000, so the NFL
+    # season is year - 1); otherwise fall back to the game number in the filename.
+    # This lets one multi-year panel file cover many seasons at once.
+    if "madden_year" in cols:
+        season = pd.to_numeric(cols["madden_year"], errors="coerce") - 1
+    else:
+        s = _season_from_filename(path)
+        if s is None:
+            return None
+        season = pd.Series(s, index=raw.index)
 
     # player name: "full_name" OR "first_name" + "last_name"
     if "full_name" in cols:
@@ -187,7 +195,9 @@ def load_one(path: str) -> pd.DataFrame | None:
         if juke is not None or spin is not None:
             out["madden_elusiveness"] = pd.concat([x for x in [juke, spin] if x is not None], axis=1).mean(axis=1)
 
-    # de-dup normalized names within a season (keep highest overall)
+    out = out.dropna(subset=["season"])
+    out["season"] = out["season"].astype(int)
+    # de-dup normalized names within a (season) (keep highest overall)
     sort_key = "madden_overall" if "madden_overall" in out.columns else "name_key"
     out = (out.sort_values(sort_key, ascending=False)
               .drop_duplicates(["season", "name_key"], keep="first")
@@ -195,33 +205,36 @@ def load_one(path: str) -> pd.DataFrame | None:
     return out
 
 
+def _attr_cols(df: pd.DataFrame) -> list[str]:
+    return [c for c in df.columns if c.startswith("madden_")
+            and c not in ("madden_team", "madden_position")]
+
+
 def load_madden(madden_dir: str = MADDEN_DIR) -> pd.DataFrame:
-    """Concatenate all available launch sheets into one (name_key, season) table."""
+    """Merge every file into one (name_key, season) table.
+
+    Files may be single-season sheets or multi-year panels. Where the same
+    (season, player) appears in more than one file, keep the row with the most
+    populated attributes, so a detailed launch sheet always beats an overall-only
+    panel entry for the seasons they share.
+    """
     paths = sorted(set(glob.glob(os.path.join(madden_dir, "*.xlsx")) +
                        glob.glob(os.path.join(madden_dir, "*.csv"))))
-    frames = []
-    seen_seasons = set()
-    for path in paths:
-        s = _season_from_filename(path)
-        if s in seen_seasons:      # avoid double-loading same season (xlsx + csv dupe)
-            continue
-        df = load_one(path)
-        if df is not None and len(df):
-            frames.append(df)
-            seen_seasons.add(s)
+    frames = [df for df in (_extract(p) for p in paths) if df is not None and len(df)]
     if not frames:
         return pd.DataFrame(columns=["season", "name_key"])
-    return pd.concat(frames, ignore_index=True)
+    allm = pd.concat(frames, ignore_index=True)
+    allm["_complete"] = allm[_attr_cols(allm)].notna().sum(axis=1)
+    allm = (allm.sort_values(["_complete", "madden_overall"], ascending=False)
+                .drop_duplicates(["season", "name_key"], keep="first")
+                .drop(columns="_complete")
+                .reset_index(drop=True))
+    return allm
 
 
 def available_seasons(madden_dir: str = MADDEN_DIR) -> list[int]:
-    seasons = set()
-    for path in (glob.glob(os.path.join(madden_dir, "*.xlsx")) +
-                 glob.glob(os.path.join(madden_dir, "*.csv"))):
-        s = _season_from_filename(path)
-        if s is not None:
-            seasons.add(s)
-    return sorted(seasons)
+    m = load_madden(madden_dir)
+    return sorted(m["season"].unique().tolist()) if len(m) else []
 
 
 if __name__ == "__main__":

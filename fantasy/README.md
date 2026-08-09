@@ -67,7 +67,12 @@ python -m ffbacktest.run ablation --start 2018 --end 2024 --eval 2023 2024
 ## Madden launch-ratings files
 
 Drop **preseason / day-one** launch spreadsheets into `data/madden/`. The loader
-accepts `.csv` or `.xlsx` and auto-harmonizes the (very different) per-year schemas.
+accepts `.csv` or `.xlsx`, auto-harmonizes the (very different) per-year schemas, and
+also reads **multi-year panel files** (one row per player-season with a `Madden_Year`
+column). Where a season appears in more than one file, the most detailed row wins, so
+a full-attribute launch sheet beats an overall-only panel entry.
+
+Current coverage: **2013–2025** — overall ratings 2013–2021, full attributes 2022–2025.
 
 **Season mapping** — a Madden game is keyed to the season it is played during:
 
@@ -79,9 +84,10 @@ accepts `.csv` or `.xlsx` and auto-harmonizes the (very different) per-year sche
 | Madden NFL 25 *(2024 edition)* | 2024 |
 | Madden NFL 26 | 2025 |
 
-The game number is parsed from the filename (`madden24_launch.csv`,
-`Madden2024Ratings.csv` → game 24 → 2023 season). **Only launch ratings** are used
-so no mid-season rating updates leak into a preseason feature.
+The season comes from a `Madden_Year` column when present (`Madden_Year = game + 2000`,
+so **NFL season = `Madden_Year - 1`**); otherwise it is parsed from the filename
+(`madden24_launch.csv`, `Madden2024Ratings.csv` → game 24 → 2023 season). **Only launch
+ratings** are used so no mid-season rating updates leak into a preseason feature.
 
 > ⚠️ "Madden NFL 25" is an ambiguous title — EA used it for both the **2013**
 > 25th-anniversary edition and the **2024** edition. Use the 2024 roster (current
