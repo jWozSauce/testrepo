@@ -83,6 +83,15 @@ def cmd_project(a):
         print(show.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
 
 
+def cmd_cheatsheet(a):
+    from . import projections as P
+    res = P.project(a.target, a.start)
+    path = P.export_excel(res, a.target, a.out)
+    n = sum(len(v) for v in res.values())
+    print(f"Wrote {a.target} cheat sheet ({n} players, tabs: All Players + "
+          f"{', '.join(P.POS)}) -> {path}")
+
+
 def main():
     p = argparse.ArgumentParser(prog="ffbacktest")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -99,9 +108,13 @@ def main():
     sp.add_argument("--start", type=int, default=2015, help="first training season")
     sp.add_argument("--pos", nargs="*", default=["QB", "RB", "WR", "TE"])
     sp.add_argument("--top", type=int, default=20)
+    sc = sub.add_parser("cheatsheet")
+    sc.add_argument("--target", type=int, default=2026, help="season to project")
+    sc.add_argument("--start", type=int, default=2015, help="first training season")
+    sc.add_argument("--out", default="exports/cheatsheet_2026.xlsx", help="output .xlsx path")
     args = p.parse_args()
     {"backtest": cmd_backtest, "ablation": cmd_ablation,
-     "project": cmd_project}[args.cmd](args)
+     "project": cmd_project, "cheatsheet": cmd_cheatsheet}[args.cmd](args)
 
 
 if __name__ == "__main__":
