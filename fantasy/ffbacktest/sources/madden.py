@@ -202,7 +202,26 @@ def _extract(path: str) -> pd.DataFrame | None:
     out = (out.sort_values(sort_key, ascending=False)
               .drop_duplicates(["season", "name_key"], keep="first")
               .reset_index(drop=True))
+    _add_depth_rank(out)
     return out
+
+
+def _add_depth_rank(out: pd.DataFrame) -> None:
+    """Rank players by Madden overall within their team+position (a role/opportunity
+    signal): rank 1 = the highest-rated player at that position on that team. A good
+    rating that sits behind a better one usually means a backup with little production.
+
+    Computed per file so team naming is internally consistent; the columns then flow
+    through the (name, season) join. Works for overall-only seasons too, since the
+    panel carries Team + Position.
+    """
+    if not {"madden_team", "madden_position", "madden_overall"}.issubset(out.columns):
+        return
+    g = out.groupby(["season", "madden_team", "madden_position"])["madden_overall"]
+    out["madden_pos_rank"] = g.rank(ascending=False, method="first")
+    out["madden_ovr_gap_to_top"] = g.transform("max") - out["madden_overall"]
+    out["madden_is_top1"] = (out["madden_pos_rank"] == 1).astype(float)
+    out["madden_team_pos_n"] = g.transform("count")
 
 
 def _attr_cols(df: pd.DataFrame) -> list[str]:

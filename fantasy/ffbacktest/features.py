@@ -16,7 +16,7 @@ import numpy as np
 from . import data as D
 from .sources.madden import load_madden, normalize_name
 
-# production columns carried as lag features (whatever is present in the season frame)
+# union of production columns to build lag tables from (whatever is present)
 _LAG_STATS = [
     "half_ppr", "half_ppr_ppg", "games",
     "targets", "receptions", "receiving_yards", "receiving_tds", "receiving_air_yards",
@@ -25,6 +25,26 @@ _LAG_STATS = [
     "attempts", "completions", "passing_yards", "passing_tds", "interceptions",
     "passing_epa", "dakota",
 ]
+
+# Per-position lag stats: only the production that matters for that position, so a QB
+# does not carry (near-zero) receiving columns and a WR does not carry passing columns.
+_COMMON_LAG = ["half_ppr", "half_ppr_ppg", "games"]
+POSITION_LAG = {
+    "QB": _COMMON_LAG + ["attempts", "completions", "passing_yards", "passing_tds",
+                         "interceptions", "passing_epa", "dakota",
+                         "carries", "rushing_yards", "rushing_tds", "rushing_epa",
+                         "rushing_first_downs"],
+    "RB": _COMMON_LAG + ["carries", "rushing_yards", "rushing_tds", "rushing_epa",
+                         "rushing_first_downs", "targets", "receptions",
+                         "receiving_yards", "receiving_tds", "target_share",
+                         "receiving_epa"],
+    "WR": _COMMON_LAG + ["targets", "receptions", "receiving_yards", "receiving_tds",
+                         "receiving_air_yards", "target_share", "air_yards_share",
+                         "wopr", "racr", "receiving_epa", "carries", "rushing_yards"],
+    "TE": _COMMON_LAG + ["targets", "receptions", "receiving_yards", "receiving_tds",
+                         "receiving_air_yards", "target_share", "air_yards_share",
+                         "wopr", "racr", "receiving_epa"],
+}
 
 # Madden features that matter for each position (harmonized canonical names)
 _MADDEN_COMMON = ["madden_overall", "madden_speed", "madden_acceleration",
@@ -42,6 +62,13 @@ POSITION_MADDEN = {
     "TE": _MADDEN_COMMON + ["madden_catching", "madden_route", "madden_release",
                             "madden_catch_in_traffic", "madden_spectacular_catch"],
 }
+
+# Within-team positional depth signal (available every season, incl. overall-only years).
+# Added to every position: a high rating behind a higher one means a backup role.
+_MADDEN_DEPTH = ["madden_pos_rank", "madden_ovr_gap_to_top",
+                 "madden_is_top1", "madden_team_pos_n"]
+for _p in POSITION_MADDEN:
+    POSITION_MADDEN[_p] = POSITION_MADDEN[_p] + _MADDEN_DEPTH
 
 _TEAM_CTX = ["team_pass_epa", "team_pass_yards", "team_pass_tds",
              "team_rush_yards", "team_rush_tds", "team_rush_epa"]
@@ -103,7 +130,8 @@ def build_frames(span_start: int, span_end: int,
         frame = frame.merge(madden[mad_cols].drop_duplicates(["season", "name_key"]),
                             on=["season", "name_key"], how="left")
 
-        lag_feats = [c for c in frame.columns if c.startswith(("lag1_", "lag2_"))]
+        lag_feats = [f"lag{k}_{s}" for k in (1, 2) for s in POSITION_LAG[pos]
+                     if f"lag{k}_{s}" in frame.columns]
         mad_feats = [c for c in POSITION_MADDEN[pos] if c in frame.columns]
         ctx_feats = [c for c in _TEAM_CTX if c in frame.columns]
         attr_feats = [c for c in _ATTR if c in frame.columns]
