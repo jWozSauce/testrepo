@@ -145,6 +145,64 @@ def build_frames(span_start: int, span_end: int,
     return frames, feat_cols
 
 
+def build_projection_frame(target: int, positions=("QB", "RB", "WR", "TE")):
+    """Build unlabeled feature rows for a FUTURE season to project.
+
+    Candidates come from the target-season rosters (there is no production data for a
+    season that hasn't happened). Features mirror build_frames: prior-year (target-1)
+    and two-year (target-2) production, target-season preseason attrs, prior-year team
+    context, and target-season Madden launch ratings + depth rank.
+    """
+    avail = []
+    for y in (target - 2, target - 1):
+        try:
+            D.load_weekly([y]); avail.append(y)
+        except Exception:
+            pass
+    ps = D.build_player_seasons(avail)
+    team = D.build_team_seasons(avail)
+    madden = load_madden()
+
+    team_lag = team.copy()
+    team_lag["season"] = team_lag["season"] + 1
+    lag1, lag2 = _lagged(ps, 1), _lagged(ps, 2)
+
+    rosters = D.load_rosters([target]).copy()
+    rosters = rosters.drop_duplicates("player_id", keep="first")
+    rosters["name_key"] = rosters["player_name"].map(normalize_name)
+    if "rookie_year" in rosters.columns:
+        rosters["is_rookie"] = (rosters["rookie_year"] == target).astype(float)
+    else:
+        rosters["is_rookie"] = np.nan
+
+    frames, feat_cols = {}, {}
+    for pos in positions:
+        cur = rosters[rosters["position"] == pos].copy()
+        if cur.empty:
+            continue
+        cur["season"] = target
+        base = ["player_id", "player_name", "name_key", "season", "position",
+                "team"] + [c for c in _ATTR if c in cur.columns]
+        frame = cur[base].copy()
+        frame = frame.merge(lag1, on=["player_id", "season"], how="left")
+        frame = frame.merge(lag2, on=["player_id", "season"], how="left")
+        frame = frame.merge(team_lag, on=["team", "season"], how="left")
+        mad_cols = ["season", "name_key"] + [c for c in POSITION_MADDEN[pos]
+                                             if c in madden.columns]
+        frame = frame.merge(madden[mad_cols].drop_duplicates(["season", "name_key"]),
+                            on=["season", "name_key"], how="left")
+        frame["has_prior"] = frame["lag1_half_ppr"].notna().astype(float)
+
+        lag_feats = [f"lag{k}_{s}" for k in (1, 2) for s in POSITION_LAG[pos]
+                     if f"lag{k}_{s}" in frame.columns]
+        mad_feats = [c for c in POSITION_MADDEN[pos] if c in frame.columns]
+        ctx_feats = [c for c in _TEAM_CTX if c in frame.columns]
+        attr_feats = [c for c in _ATTR if c in frame.columns]
+        frames[pos] = frame
+        feat_cols[pos] = attr_feats + lag_feats + ctx_feats + mad_feats + ["has_prior"]
+    return frames, feat_cols
+
+
 def madden_match_rate(span_start: int, span_end: int) -> pd.DataFrame:
     """Diagnostic: share of position players per season matched to a Madden rating."""
     frames, _ = build_frames(span_start, span_end)

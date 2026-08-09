@@ -54,6 +54,9 @@ python -m ffbacktest.run backtest --start 2016 --end 2024 --eval 2023 2024 --pos
 
 # Measure Madden's added value (needs Madden files in >= 2 labelled seasons)
 python -m ffbacktest.run ablation --start 2018 --end 2024 --eval 2023 2024
+
+# Project a future season (a draft cheat sheet) from its Madden launch ratings
+python -m ffbacktest.run project --target 2026 --start 2015 --top 20
 ```
 
 ### Metrics

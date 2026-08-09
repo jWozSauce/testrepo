@@ -67,6 +67,22 @@ def cmd_ablation(a):
     print("\nmae_lift > 0  and  spearman_lift > 0  mean Madden helped.")
 
 
+def cmd_project(a):
+    res = B.project_season(a.target, a.start, tuple(a.pos))
+    if res.empty:
+        print("No projections produced.")
+        return
+    print(f"\n{a.target} half-PPR projections (Madden {a.target - 1999} launch ratings; "
+          f"trained on {a.start}-{a.target - 1})")
+    for pos in a.pos:
+        sub = res[res.position == pos].head(a.top)
+        if sub.empty:
+            continue
+        print(f"\n=== {pos} — top {a.top} ===")
+        show = sub[["pos_rank", "player_name", "team", "age", "madden_overall", "proj_half_ppr"]]
+        print(show.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
+
+
 def main():
     p = argparse.ArgumentParser(prog="ffbacktest")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -78,8 +94,14 @@ def main():
         s.add_argument("--pos", nargs="*", default=["QB", "RB", "WR", "TE"])
         s.add_argument("--no-madden", action="store_true")
         s.add_argument("--show-top", action="store_true")
+    sp = sub.add_parser("project")
+    sp.add_argument("--target", type=int, default=2026, help="season to project")
+    sp.add_argument("--start", type=int, default=2015, help="first training season")
+    sp.add_argument("--pos", nargs="*", default=["QB", "RB", "WR", "TE"])
+    sp.add_argument("--top", type=int, default=20)
     args = p.parse_args()
-    (cmd_backtest if args.cmd == "backtest" else cmd_ablation)(args)
+    {"backtest": cmd_backtest, "ablation": cmd_ablation,
+     "project": cmd_project}[args.cmd](args)
 
 
 if __name__ == "__main__":

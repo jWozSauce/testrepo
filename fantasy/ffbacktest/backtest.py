@@ -74,6 +74,31 @@ def walk_forward(span_start: int, span_end: int, eval_seasons,
     return per_season, predictions
 
 
+def project_season(target: int, span_start: int,
+                   positions=("QB", "RB", "WR", "TE"), seed: int = 0):
+    """Train per-position models on all labelled seasons < target, then project the
+    target season from its (unlabelled) preseason feature frame. Returns a ranked
+    projection DataFrame."""
+    train_frames, feat_cols = F.build_frames(span_start, target - 1, positions)
+    proj_frames, _ = F.build_projection_frame(target, positions)
+    out = []
+    for pos in positions:
+        if pos not in train_frames or pos not in proj_frames:
+            continue
+        f, proj = train_frames[pos], proj_frames[pos]
+        feats = [c for c in feat_cols[pos]
+                 if c in proj.columns and f[c].nunique(dropna=True) >= 2]
+        model = M.make_model(seed)
+        model.fit(f[feats].to_numpy(float), f["y"].to_numpy(float))
+        proj = proj.copy()
+        proj["proj_half_ppr"] = model.predict(proj[feats].to_numpy(float))
+        proj["pos_rank"] = proj["proj_half_ppr"].rank(ascending=False, method="first")
+        out.append(proj[["player_name", "position", "team", "age",
+                         "madden_overall", "proj_half_ppr", "pos_rank"]])
+    res = pd.concat(out, ignore_index=True) if out else pd.DataFrame()
+    return res.sort_values(["position", "proj_half_ppr"], ascending=[True, False])
+
+
 def pooled(per_season: pd.DataFrame) -> pd.DataFrame:
     """Average metrics across evaluated seasons, per position (n-weighted where sensible)."""
     if per_season.empty:
