@@ -34,13 +34,30 @@ _SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
 
 def normalize_name(name: str) -> str:
-    """Lowercase, strip punctuation and generational suffixes for joining."""
+    """Lowercase, strip punctuation and generational suffixes, and collapse initial
+    runs so both sides of a join agree.
+
+    Datasets disagree on initials spacing ("D.K."->'d k' vs "DK"->'dk'), so runs of
+    single-letter tokens are merged: ['d','k','metcalf'] -> 'dk metcalf'. This is exact
+    (no fuzzy guessing) and cannot mis-attach a different player.
+    """
     if not isinstance(name, str):
         return ""
     n = name.lower().replace(".", " ").replace("-", " ").replace("'", "")
     n = re.sub(r"[^a-z ]", " ", n)
     parts = [p for p in n.split() if p and p not in _SUFFIXES]
-    return " ".join(parts)
+    merged, buf = [], ""
+    for p in parts:
+        if len(p) == 1:
+            buf += p
+        else:
+            if buf:
+                merged.append(buf)
+                buf = ""
+            merged.append(p)
+    if buf:
+        merged.append(buf)
+    return " ".join(merged)
 
 
 def _snake(col: str) -> str:
