@@ -86,10 +86,11 @@ def cmd_project(a):
 def cmd_cheatsheet(a):
     from . import projections as P
     res = P.project(a.target, a.start)
-    path = P.export_excel(res, a.target, a.out)
+    path = P.export_excel(res, a.target, a.out, adp_path=a.adp)
     n = sum(len(v) for v in res.values())
-    print(f"Wrote {a.target} cheat sheet ({n} players, tabs: All Players + "
-          f"{', '.join(P.POS)}) -> {path}")
+    extra = " + Values/Reaches (ADP)" if a.adp else ""
+    print(f"Wrote {a.target} cheat sheet ({n} players, tabs: Draft Board + All Players + "
+          f"{', '.join(P.POS)}{extra}) -> {path}")
 
 
 def main():
@@ -112,6 +113,7 @@ def main():
     sc.add_argument("--target", type=int, default=2026, help="season to project")
     sc.add_argument("--start", type=int, default=2015, help="first training season")
     sc.add_argument("--out", default="exports/cheatsheet_2026.xlsx", help="output .xlsx path")
+    sc.add_argument("--adp", default=None, help="path to an ADP .xlsx to compare against")
     args = p.parse_args()
     {"backtest": cmd_backtest, "ablation": cmd_ablation,
      "project": cmd_project, "cheatsheet": cmd_cheatsheet}[args.cmd](args)

@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from . import features as F, data as D, models as M
+from .sources.madden import normalize_name
 
 POS = ("QB", "RB", "WR", "TE")
 
@@ -39,29 +40,57 @@ DISPLAY = {
     "pos_rank": "Pos Rk", "ovr_rank": "Ovr Rk", "player_name": "Player",
     "position": "Pos", "team": "Team", "age": "Age", "madden_overall": "MAD",
     "vbd": "VBD", "tier": "Tier", "vbd_rank": "Rk",
+    "adp_rank": "ADP", "mdl_rank": "Model", "value": "Val",
 }
+VALUE_COLS = ["player_name", "position", "team", "tier", "adp_rank", "mdl_rank",
+              "value", "proj_points", "vbd"]
+
+
+def load_adp(path):
+    """Read a fantasy ADP sheet (Rank/Name/Team/Pos header on the 2nd row) and return a
+    (name_key, adp_rank) table for skill positions."""
+    d = pd.read_excel(path, header=1)
+    d = d.rename(columns={d.columns[0]: "adp_rank", d.columns[1]: "name",
+                          d.columns[3]: "pos"})
+    d["adp_rank"] = pd.to_numeric(d["adp_rank"], errors="coerce")
+    d = d[d["pos"].isin(POS) & d["adp_rank"].notna()].copy()
+    d["name_key"] = d["name"].map(normalize_name)
+    return d[["name_key", "adp_rank"]].drop_duplicates("name_key")
+
+
+def attach_adp(board, adp):
+    """Merge ADP onto a projection board and compute model-vs-market value. Value =
+    market_rank - model_rank within the matched pool (+ = model higher than market)."""
+    b = board.copy()
+    b["name_key"] = b["player_name"].map(normalize_name)
+    b = b.merge(adp, on="name_key", how="left")
+    common = b[b["adp_rank"].notna()].copy()
+    common["mkt_rank"] = common["adp_rank"].rank(method="first")
+    common["mdl_rank"] = common["vbd"].rank(ascending=False, method="first")
+    common["value"] = (common["mkt_rank"] - common["mdl_rank"]).round(0)
+    return b.merge(common[["name_key", "mdl_rank", "value"]], on="name_key", how="left")
 
 # 12-team league, half-PPR, standard lineup.
 LEAGUE = dict(teams=12, starters={"QB": 1, "RB": 2, "WR": 3, "TE": 1},
               flex=1, flex_pos=("RB", "WR", "TE"))
 
+# Streaming/scarcity-adjusted replacement ranks (12-team, half-PPR). VBD for a player =
+# points over the Nth player at his position. QB/TE are SHALLOW (you can stream a
+# startable one, so replacement is good -> elite VBD is modest); RB/WR are DEEP (scarce,
+# injuries/committees -> replacement is poor -> elite VBD is large). This matches how the
+# market actually drafts far better than one-per-team starter baselines.
+BASELINE_RANK = {"QB": 12, "RB": 40, "WR": 55, "TE": 12}
 
-def add_vbd(allp, league=LEAGUE):
-    """Value-based drafting: points over replacement. Replacement = best NON-starter at
-    each position, where starters are the positional starters PLUS the top flex-eligible
-    leftovers (so the flex spot is allocated dynamically to whoever deserves it)."""
+
+def add_vbd(allp, baseline_rank=BASELINE_RANK):
+    """Value over replacement, where replacement is the Nth-ranked player at the position
+    (N per BASELINE_RANK). Returns (df with 'vbd', baseline points per position)."""
     df = allp.copy()
-    df["is_starter"] = False
-    for p, n in league["starters"].items():
-        idx = df[df.position == p].nlargest(league["teams"] * n, "proj_points").index
-        df.loc[idx, "is_starter"] = True
-    flex_spots = league["teams"] * league["flex"]
-    pool = df[(~df.is_starter) & (df.position.isin(league["flex_pos"]))]
-    df.loc[pool.nlargest(flex_spots, "proj_points").index, "is_starter"] = True
     base = {}
     for p in df.position.unique():
-        ns = df[(df.position == p) & (~df.is_starter)]["proj_points"]
-        base[p] = float(ns.max()) if len(ns) else 0.0
+        n = baseline_rank.get(p, 24)
+        s = df[df.position == p].nlargest(n, "proj_points")["proj_points"]
+        base[p] = float(s.iloc[-1]) if len(s) >= 1 else 0.0
     df["vbd"] = (df["proj_points"] - df["position"].map(base)).round(0)
     return df, base
 
@@ -152,21 +181,21 @@ def project(target: int = 2026, span_start: int = 2015):
     return results
 
 
+_INT_COLS = {"age", "madden_overall", "vbd", "adp_rank", "value", "mdl_rank",
+             "vbd_rank", "pos_rank", "ovr_rank", "tier"}
+
+
 def _round(df):
     df = df.copy()
     for c in df.columns:
         if c == "proj_ppg":
             df[c] = df[c].round(1)
-        elif c.startswith("proj_") and c.replace("proj_", "") in _COUNTS:
-            df[c] = df[c].round(0).astype("Int64")
-        elif c.startswith("proj_"):
-            df[c] = df[c].round(0).astype("Int64")
-        elif c in ("age", "madden_overall"):
+        elif c.startswith("proj_") or c in _INT_COLS:
             df[c] = df[c].round(0).astype("Int64")
     return df
 
 
-def export_excel(results, target, path):
+def export_excel(results, target, path, adp_path=None):
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
@@ -175,21 +204,37 @@ def export_excel(results, target, path):
         d = df.copy(); d["position"] = pos
         combined.append(d)
     allp = pd.concat(combined, ignore_index=True)
-    allp, baselines = add_vbd(allp, LEAGUE)
+    allp, baselines = add_vbd(allp)
     allp = add_tiers(allp)
 
     board = allp.sort_values("vbd", ascending=False).reset_index(drop=True)
     board["vbd_rank"] = np.arange(1, len(board) + 1)
+
+    board_cols = list(BOARD_COLS)
+    value_sheets = {}
+    if adp_path:
+        board = attach_adp(board, load_adp(adp_path))
+        # insert ADP + Value right after VBD on the board
+        board_cols = ["vbd_rank", "player_name", "position", "tier", "team", "age",
+                      "proj_points", "vbd", "adp_rank", "value", "proj_ppg", "pos_rank"]
+        matched = board[board["value"].notna()]
+        values = matched[(matched.mdl_rank <= 130) & (matched.value >= 15)] \
+            .sort_values("value", ascending=False)
+        reaches = matched[(matched.adp_rank <= 120) & (matched.value <= -15)] \
+            .sort_values("value")
+        value_sheets = {
+            "Values": _round(values[VALUE_COLS]),
+            "Reaches": _round(reaches[VALUE_COLS]),
+        }
+
     allp = allp.merge(board[["player_name", "position", "vbd_rank"]],
                       on=["player_name", "position"], how="left")
-
     allp_pts = allp.sort_values("proj_points", ascending=False).reset_index(drop=True)
     allp_pts["ovr_rank"] = np.arange(1, len(allp_pts) + 1)
 
-    sheets = {
-        "Draft Board": _round(board[[c for c in BOARD_COLS if c in board.columns]]),
-        "All Players": _round(allp_pts[[c for c in ALL_COLS if c in allp_pts.columns]]),
-    }
+    sheets = {"Draft Board": _round(board[[c for c in board_cols if c in board.columns]])}
+    sheets.update(value_sheets)
+    sheets["All Players"] = _round(allp_pts[[c for c in ALL_COLS if c in allp_pts.columns]])
     for pos in POS:
         d = allp[allp.position == pos].sort_values("proj_points", ascending=False)
         cols = [c for c in TAB_COLS[pos] if c in d.columns]
@@ -217,7 +262,12 @@ def export_excel(results, target, path):
             "",
             "Caveats: injuries are not predicted; rookies lean on draft slot + Madden and are the",
             "least certain. A model baseline, not gospel.",
-        ]})
+        ] + ([
+            "",
+            "ADP = market consensus draft rank (attached file). Val = market_rank - model_rank",
+            "among matched players: positive = model likes him more than the market (a VALUE),",
+            "negative = market likes him more (a REACH). See the Values and Reaches tabs.",
+        ] if adp_path else [])})
 
     with pd.ExcelWriter(path, engine="openpyxl") as xl:
         about.to_excel(xl, sheet_name="About", index=False)
