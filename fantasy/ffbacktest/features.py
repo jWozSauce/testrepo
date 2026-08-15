@@ -16,34 +16,36 @@ import numpy as np
 from . import data as D
 from .sources.madden import load_madden, normalize_name
 
+# Production lag features are PER-GAME rates (suffix _pg) plus already-per-week share/
+# efficiency stats, so missing games does not deflate the production signal. `games` is
+# carried separately as availability/role context; the target is still season total.
+_RATE = ["target_share", "air_yards_share", "wopr", "racr", "dakota"]
+_PG_VOL = ["passing_yards", "passing_tds", "interceptions", "completions", "attempts",
+           "carries", "rushing_yards", "rushing_tds", "rushing_first_downs",
+           "targets", "receptions", "receiving_yards", "receiving_tds",
+           "receiving_air_yards", "passing_epa", "rushing_epa", "receiving_epa"]
 # union of production columns to build lag tables from (whatever is present)
-_LAG_STATS = [
-    "half_ppr", "half_ppr_ppg", "games",
-    "targets", "receptions", "receiving_yards", "receiving_tds", "receiving_air_yards",
-    "target_share", "air_yards_share", "wopr", "racr", "receiving_epa",
-    "carries", "rushing_yards", "rushing_tds", "rushing_epa", "rushing_first_downs",
-    "attempts", "completions", "passing_yards", "passing_tds", "interceptions",
-    "passing_epa", "dakota",
-]
+_LAG_STATS = ["half_ppr_ppg", "games"] + [s + "_pg" for s in _PG_VOL] + _RATE
 
 # Per-position lag stats: only the production that matters for that position, so a QB
 # does not carry (near-zero) receiving columns and a WR does not carry passing columns.
-_COMMON_LAG = ["half_ppr", "half_ppr_ppg", "games"]
+_COMMON_LAG = ["half_ppr_ppg", "games"]
 POSITION_LAG = {
-    "QB": _COMMON_LAG + ["attempts", "completions", "passing_yards", "passing_tds",
-                         "interceptions", "passing_epa", "dakota",
-                         "carries", "rushing_yards", "rushing_tds", "rushing_epa",
-                         "rushing_first_downs"],
-    "RB": _COMMON_LAG + ["carries", "rushing_yards", "rushing_tds", "rushing_epa",
-                         "rushing_first_downs", "targets", "receptions",
-                         "receiving_yards", "receiving_tds", "target_share",
-                         "receiving_epa"],
-    "WR": _COMMON_LAG + ["targets", "receptions", "receiving_yards", "receiving_tds",
-                         "receiving_air_yards", "target_share", "air_yards_share",
-                         "wopr", "racr", "receiving_epa", "carries", "rushing_yards"],
-    "TE": _COMMON_LAG + ["targets", "receptions", "receiving_yards", "receiving_tds",
-                         "receiving_air_yards", "target_share", "air_yards_share",
-                         "wopr", "racr", "receiving_epa"],
+    "QB": _COMMON_LAG + ["attempts_pg", "completions_pg", "passing_yards_pg",
+                         "passing_tds_pg", "interceptions_pg", "passing_epa_pg", "dakota",
+                         "carries_pg", "rushing_yards_pg", "rushing_tds_pg",
+                         "rushing_epa_pg", "rushing_first_downs_pg"],
+    "RB": _COMMON_LAG + ["carries_pg", "rushing_yards_pg", "rushing_tds_pg",
+                         "rushing_epa_pg", "rushing_first_downs_pg", "targets_pg",
+                         "receptions_pg", "receiving_yards_pg", "receiving_tds_pg",
+                         "target_share", "receiving_epa_pg"],
+    "WR": _COMMON_LAG + ["targets_pg", "receptions_pg", "receiving_yards_pg",
+                         "receiving_tds_pg", "receiving_air_yards_pg", "target_share",
+                         "air_yards_share", "wopr", "racr", "receiving_epa_pg",
+                         "carries_pg", "rushing_yards_pg"],
+    "TE": _COMMON_LAG + ["targets_pg", "receptions_pg", "receiving_yards_pg",
+                         "receiving_tds_pg", "receiving_air_yards_pg", "target_share",
+                         "air_yards_share", "wopr", "racr", "receiving_epa_pg"],
 }
 
 # Madden features that matter for each position (harmonized canonical names)
@@ -90,7 +92,7 @@ def build_frames(span_start: int, span_end: int,
     span covers the seasons for which we build LABELLED rows; lag features reach
     back two more seasons, which are pulled automatically.
     """
-    pull = list(range(span_start - 2, span_end + 1))
+    pull = list(range(span_start - 3, span_end + 1))
     # 2025+ weekly may be unpublished; pull only what exists.
     avail = []
     for y in pull:
@@ -110,7 +112,7 @@ def build_frames(span_start: int, span_end: int,
     ps = ps.copy()
     ps["name_key"] = ps["player_name"].map(normalize_name)
 
-    lag1, lag2 = _lagged(ps, 1), _lagged(ps, 2)
+    lag1, lag2, lag3 = _lagged(ps, 1), _lagged(ps, 2), _lagged(ps, 3)
 
     frames, feat_cols = {}, {}
     for pos in positions:
@@ -122,6 +124,7 @@ def build_frames(span_start: int, span_end: int,
         frame = cur[base_cols].rename(columns={"half_ppr": "y"})
         frame = frame.merge(lag1, on=["player_id", "season"], how="left")
         frame = frame.merge(lag2, on=["player_id", "season"], how="left")
+        frame = frame.merge(lag3, on=["player_id", "season"], how="left")
         frame = frame.merge(team_lag, on=["team", "season"], how="left")
 
         # merge preseason Madden for the target season
@@ -130,14 +133,14 @@ def build_frames(span_start: int, span_end: int,
         frame = frame.merge(madden[mad_cols].drop_duplicates(["season", "name_key"]),
                             on=["season", "name_key"], how="left")
 
-        lag_feats = [f"lag{k}_{s}" for k in (1, 2) for s in POSITION_LAG[pos]
+        lag_feats = [f"lag{k}_{s}" for k in (1, 2, 3) for s in POSITION_LAG[pos]
                      if f"lag{k}_{s}" in frame.columns]
         mad_feats = [c for c in POSITION_MADDEN[pos] if c in frame.columns]
         ctx_feats = [c for c in _TEAM_CTX if c in frame.columns]
         attr_feats = [c for c in _ATTR if c in frame.columns]
         features = attr_feats + lag_feats + ctx_feats + mad_feats
 
-        frame["has_prior"] = frame["lag1_half_ppr"].notna().astype(float)
+        frame["has_prior"] = frame["lag1_half_ppr_ppg"].notna().astype(float)
         features.append("has_prior")
 
         frames[pos] = frame
@@ -154,7 +157,7 @@ def build_projection_frame(target: int, positions=("QB", "RB", "WR", "TE")):
     context, and target-season Madden launch ratings + depth rank.
     """
     avail = []
-    for y in (target - 2, target - 1):
+    for y in (target - 3, target - 2, target - 1):
         try:
             D.load_weekly([y]); avail.append(y)
         except Exception:
@@ -165,7 +168,7 @@ def build_projection_frame(target: int, positions=("QB", "RB", "WR", "TE")):
 
     team_lag = team.copy()
     team_lag["season"] = team_lag["season"] + 1
-    lag1, lag2 = _lagged(ps, 1), _lagged(ps, 2)
+    lag1, lag2, lag3 = _lagged(ps, 1), _lagged(ps, 2), _lagged(ps, 3)
 
     rosters = D.load_rosters([target]).copy()
     rosters = rosters.drop_duplicates("player_id", keep="first")
@@ -186,14 +189,15 @@ def build_projection_frame(target: int, positions=("QB", "RB", "WR", "TE")):
         frame = cur[base].copy()
         frame = frame.merge(lag1, on=["player_id", "season"], how="left")
         frame = frame.merge(lag2, on=["player_id", "season"], how="left")
+        frame = frame.merge(lag3, on=["player_id", "season"], how="left")
         frame = frame.merge(team_lag, on=["team", "season"], how="left")
         mad_cols = ["season", "name_key"] + [c for c in POSITION_MADDEN[pos]
                                              if c in madden.columns]
         frame = frame.merge(madden[mad_cols].drop_duplicates(["season", "name_key"]),
                             on=["season", "name_key"], how="left")
-        frame["has_prior"] = frame["lag1_half_ppr"].notna().astype(float)
+        frame["has_prior"] = frame["lag1_half_ppr_ppg"].notna().astype(float)
 
-        lag_feats = [f"lag{k}_{s}" for k in (1, 2) for s in POSITION_LAG[pos]
+        lag_feats = [f"lag{k}_{s}" for k in (1, 2, 3) for s in POSITION_LAG[pos]
                      if f"lag{k}_{s}" in frame.columns]
         mad_feats = [c for c in POSITION_MADDEN[pos] if c in frame.columns]
         ctx_feats = [c for c in _TEAM_CTX if c in frame.columns]

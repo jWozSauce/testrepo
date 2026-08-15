@@ -138,6 +138,17 @@ def build_player_seasons(seasons: list[int]) -> pd.DataFrame:
     df["position"] = df["position"].fillna(df["position_wk"])
     df["team"] = df.get("team")
     df["half_ppr_ppg"] = df["half_ppr"] / df["games"].clip(lower=1)
+    # Per-game rate versions of volume stats, so a player who missed games is not
+    # penalized on the production side (availability is handled separately). Rate/share
+    # stats (_MEAN_COLS: target_share, wopr, ...) are already per-week averages.
+    _PG = ["passing_yards", "passing_tds", "interceptions", "completions", "attempts",
+           "carries", "rushing_yards", "rushing_tds", "rushing_first_downs",
+           "targets", "receptions", "receiving_yards", "receiving_tds",
+           "receiving_air_yards", "passing_epa", "rushing_epa", "receiving_epa"]
+    g = df["games"].clip(lower=1)
+    for c in _PG:
+        if c in df.columns:
+            df[c + "_pg"] = df[c] / g
     if "rookie_year" in df.columns:
         df["is_rookie"] = (df["rookie_year"] == df["season"]).astype("float")
     else:
