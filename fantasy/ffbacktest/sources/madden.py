@@ -246,7 +246,13 @@ def _add_depth_rank(out: pd.DataFrame) -> None:
     out["madden_pos_rank"] = g.rank(ascending=False, method="first")
     out["madden_ovr_gap_to_top"] = g.transform("max") - out["madden_overall"]
     out["madden_is_top1"] = (out["madden_pos_rank"] == 1).astype(float)
-    out["madden_team_pos_n"] = g.transform("count")
+    cnt = g.transform("count")
+    out["madden_team_pos_n"] = cnt
+    # plus/minus over the leave-one-out average of same-position teammates: a large
+    # positive edge = clearly the guy; near zero = stuck in a pool of similar players
+    # (opportunity disadvantage). NaN when he is the only one at the position.
+    others_mean = (g.transform("sum") - out["madden_overall"]) / (cnt - 1).where(cnt > 1)
+    out["madden_pos_edge"] = out["madden_overall"] - others_mean
 
 
 def _attr_cols(df: pd.DataFrame) -> list[str]:

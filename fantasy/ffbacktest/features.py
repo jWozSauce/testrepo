@@ -85,6 +85,20 @@ def _lagged(ps: pd.DataFrame, k: int) -> pd.DataFrame:
     return lag.rename(columns={c: f"lag{k}_{c}" for c in cols})
 
 
+# Past-season Madden depth/role context: where the player ranked at his position on his
+# team, his plus/minus over same-position teammates, and how crowded the room was. Lets
+# the model see that a low prior-production year came from an opportunity disadvantage
+# (buried in a committee) rather than a lack of talent.
+_MADDEN_HIST = ["madden_pos_rank", "madden_pos_edge", "madden_team_pos_n"]
+
+
+def _madden_lagged(madden: pd.DataFrame, k: int) -> pd.DataFrame:
+    cols = [c for c in _MADDEN_HIST if c in madden.columns]
+    m = madden[["name_key", "season"] + cols].drop_duplicates(["name_key", "season"]).copy()
+    m["season"] = m["season"] + k
+    return m.rename(columns={c: f"lag{k}_{c}" for c in cols})
+
+
 def build_frames(span_start: int, span_end: int,
                  positions=("QB", "RB", "WR", "TE")):
     """Return (frames, feature_cols) where frames[pos] is a modeling DataFrame.
@@ -113,6 +127,8 @@ def build_frames(span_start: int, span_end: int,
     ps["name_key"] = ps["player_name"].map(normalize_name)
 
     lag1, lag2, lag3 = _lagged(ps, 1), _lagged(ps, 2), _lagged(ps, 3)
+    mh1, mh2, mh3 = (_madden_lagged(madden, 1), _madden_lagged(madden, 2),
+                     _madden_lagged(madden, 3))
 
     frames, feat_cols = {}, {}
     for pos in positions:
@@ -132,13 +148,19 @@ def build_frames(span_start: int, span_end: int,
                                              if c in madden.columns]
         frame = frame.merge(madden[mad_cols].drop_duplicates(["season", "name_key"]),
                             on=["season", "name_key"], how="left")
+        for mh in (mh1, mh2, mh3):
+            frame = frame.merge(mh, on=["name_key", "season"], how="left")
 
         lag_feats = [f"lag{k}_{s}" for k in (1, 2, 3) for s in POSITION_LAG[pos]
                      if f"lag{k}_{s}" in frame.columns]
+        # past-season depth/competition only matters where a position group shares
+        # touches (RB/WR/TE); a QB has no in-position competition, so it is just noise.
+        mhist_feats = [f"lag{k}_{c}" for k in (1, 2, 3) for c in _MADDEN_HIST
+                       if f"lag{k}_{c}" in frame.columns] if pos != "QB" else []
         mad_feats = [c for c in POSITION_MADDEN[pos] if c in frame.columns]
         ctx_feats = [c for c in _TEAM_CTX if c in frame.columns]
         attr_feats = [c for c in _ATTR if c in frame.columns]
-        features = attr_feats + lag_feats + ctx_feats + mad_feats
+        features = attr_feats + lag_feats + ctx_feats + mad_feats + mhist_feats
 
         frame["has_prior"] = frame["lag1_half_ppr_ppg"].notna().astype(float)
         features.append("has_prior")
@@ -169,6 +191,8 @@ def build_projection_frame(target: int, positions=("QB", "RB", "WR", "TE")):
     team_lag = team.copy()
     team_lag["season"] = team_lag["season"] + 1
     lag1, lag2, lag3 = _lagged(ps, 1), _lagged(ps, 2), _lagged(ps, 3)
+    mh1, mh2, mh3 = (_madden_lagged(madden, 1), _madden_lagged(madden, 2),
+                     _madden_lagged(madden, 3))
 
     rosters = D.load_rosters([target]).copy()
     rosters = rosters.drop_duplicates("player_id", keep="first")
@@ -195,15 +219,20 @@ def build_projection_frame(target: int, positions=("QB", "RB", "WR", "TE")):
                                              if c in madden.columns]
         frame = frame.merge(madden[mad_cols].drop_duplicates(["season", "name_key"]),
                             on=["season", "name_key"], how="left")
+        for mh in (mh1, mh2, mh3):
+            frame = frame.merge(mh, on=["name_key", "season"], how="left")
         frame["has_prior"] = frame["lag1_half_ppr_ppg"].notna().astype(float)
 
         lag_feats = [f"lag{k}_{s}" for k in (1, 2, 3) for s in POSITION_LAG[pos]
                      if f"lag{k}_{s}" in frame.columns]
+        mhist_feats = [f"lag{k}_{c}" for k in (1, 2, 3) for c in _MADDEN_HIST
+                       if f"lag{k}_{c}" in frame.columns] if pos != "QB" else []
         mad_feats = [c for c in POSITION_MADDEN[pos] if c in frame.columns]
         ctx_feats = [c for c in _TEAM_CTX if c in frame.columns]
         attr_feats = [c for c in _ATTR if c in frame.columns]
         frames[pos] = frame
-        feat_cols[pos] = attr_feats + lag_feats + ctx_feats + mad_feats + ["has_prior"]
+        feat_cols[pos] = (attr_feats + lag_feats + ctx_feats + mad_feats
+                          + mhist_feats + ["has_prior"])
     return frames, feat_cols
 
 
