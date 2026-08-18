@@ -113,20 +113,38 @@ W_DOUBLE = 1.00
 SHRINK_POS = {"QB", "WR", "TE"}
 
 
-def _position_priors(ps: pd.DataFrame, pos: str, stats) -> dict:
-    # "typical contributor" baseline: unweighted mean over seasons with a real sample
-    sub = ps[(ps["position"] == pos)
-             & (pd.to_numeric(ps.get("games"), errors="coerce").fillna(0) >= 4)]
-    prior = {}
+def _pedigree_priors(frame: pd.DataFrame, ps_m: pd.DataFrame, pos: str, stats) -> dict:
+    """Per-row shrinkage target from PEDIGREE: fit each per-game stat on Madden overall
+    + draft slot over historical player-seasons, then predict what THIS player's rating
+    and draft capital imply. A low-rated rookie regresses toward a below-average line;
+    a highly-rated one keeps a high target. Falls back to the position mean where a fit
+    or the player's rating is unavailable. (The fit is a population relationship, not
+    player-specific outcomes.)"""
+    sub = ps_m[(ps_m["position"] == pos)
+               & (pd.to_numeric(ps_m.get("games"), errors="coerce").fillna(0) >= 4)
+               & ps_m["madden_overall"].notna()]
+    dm = pd.to_numeric(sub["madden_overall"], errors="coerce").to_numpy(float)
+    dd = pd.to_numeric(sub.get("draft_number"), errors="coerce").fillna(260).to_numpy(float)
+    Xfit = np.column_stack([np.ones(len(sub)), dm, dd])
+    fm = pd.to_numeric(frame["madden_overall"], errors="coerce")
+    fd = pd.to_numeric(frame.get("draft_number"), errors="coerce").fillna(260)
+    priors = {}
     for s in stats:
-        if s in sub.columns:
-            v = pd.to_numeric(sub[s], errors="coerce")
-            if v.notna().any():
-                prior[s] = float(v.mean())
-    return prior
+        if s not in sub.columns:
+            continue
+        y = pd.to_numeric(sub[s], errors="coerce").to_numpy(float)
+        m = ~np.isnan(y)
+        flat = float(np.nanmean(y[m])) if m.any() else np.nan
+        pr = pd.Series(flat, index=frame.index)
+        if m.sum() >= 40:
+            coef, *_ = np.linalg.lstsq(Xfit[m], y[m], rcond=None)
+            pred = (coef[0] + coef[1] * fm + coef[2] * fd).clip(lower=0)
+            pr = pred.where(fm.notna(), flat)
+        priors[s] = pr
+    return priors
 
 
-def _shrink_lags(frame: pd.DataFrame, prior: dict, stats):
+def _shrink_lags(frame: pd.DataFrame, priors: dict, stats):
     gcols = [f"lag{k}_games" for k in (1, 2, 3) if f"lag{k}_games" in frame.columns]
     if not gcols:
         return frame
@@ -138,9 +156,9 @@ def _shrink_lags(frame: pd.DataFrame, prior: dict, stats):
     for k in (1, 2, 3):
         for s in stats:
             col = f"lag{k}_{s}"
-            if col in frame.columns and s in prior:
+            if col in frame.columns and s in priors:
                 rate = frame[col]
-                frame[col] = rate.where(rate.isna(), wt * rate + (1 - wt) * prior[s])
+                frame[col] = rate.where(rate.isna(), wt * rate + (1 - wt) * priors[s])
     return frame
 
 
@@ -174,6 +192,9 @@ def build_frames(span_start: int, span_end: int,
     lag1, lag2, lag3 = _lagged(ps, 1), _lagged(ps, 2), _lagged(ps, 3)
     mh1, mh2, mh3 = (_madden_lagged(madden, 1), _madden_lagged(madden, 2),
                      _madden_lagged(madden, 3))
+    ps_m = ps.merge(madden[["name_key", "season", "madden_overall"]]
+                    .drop_duplicates(["name_key", "season"]),
+                    on=["name_key", "season"], how="left")
 
     frames, feat_cols = {}, {}
     for pos in positions:
@@ -197,7 +218,7 @@ def build_frames(span_start: int, span_end: int,
             frame = frame.merge(mh, on=["name_key", "season"], how="left")
         if pos in SHRINK_POS:
             prod_stats = [s for s in POSITION_LAG[pos] if s != "games"]
-            _shrink_lags(frame, _position_priors(ps, pos, prod_stats), prod_stats)
+            _shrink_lags(frame, _pedigree_priors(frame, ps_m, pos, prod_stats), prod_stats)
 
         lag_feats = [f"lag{k}_{s}" for k in (1, 2, 3) for s in POSITION_LAG[pos]
                      if f"lag{k}_{s}" in frame.columns]
@@ -241,6 +262,10 @@ def build_projection_frame(target: int, positions=("QB", "RB", "WR", "TE")):
     lag1, lag2, lag3 = _lagged(ps, 1), _lagged(ps, 2), _lagged(ps, 3)
     mh1, mh2, mh3 = (_madden_lagged(madden, 1), _madden_lagged(madden, 2),
                      _madden_lagged(madden, 3))
+    ps["name_key"] = ps["player_name"].map(normalize_name)
+    ps_m = ps.merge(madden[["name_key", "season", "madden_overall"]]
+                    .drop_duplicates(["name_key", "season"]),
+                    on=["name_key", "season"], how="left")
 
     rosters = D.load_rosters([target]).copy()
     rosters = rosters.drop_duplicates("player_id", keep="first")
@@ -271,7 +296,7 @@ def build_projection_frame(target: int, positions=("QB", "RB", "WR", "TE")):
             frame = frame.merge(mh, on=["name_key", "season"], how="left")
         if pos in SHRINK_POS:
             prod_stats = [s for s in POSITION_LAG[pos] if s != "games"]
-            _shrink_lags(frame, _position_priors(ps, pos, prod_stats), prod_stats)
+            _shrink_lags(frame, _pedigree_priors(frame, ps_m, pos, prod_stats), prod_stats)
         frame["has_prior"] = frame["lag1_half_ppr_ppg"].notna().astype(float)
 
         lag_feats = [f"lag{k}_{s}" for k in (1, 2, 3) for s in POSITION_LAG[pos]
