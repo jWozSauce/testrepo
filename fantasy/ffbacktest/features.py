@@ -24,8 +24,9 @@ _PG_VOL = ["passing_yards", "passing_tds", "interceptions", "completions", "atte
            "carries", "rushing_yards", "rushing_tds", "rushing_first_downs",
            "targets", "receptions", "receiving_yards", "receiving_tds",
            "receiving_air_yards", "passing_epa", "rushing_epa", "receiving_epa"]
-# union of production columns to build lag tables from (whatever is present)
-_LAG_STATS = ["half_ppr_ppg", "games"] + [s + "_pg" for s in _PG_VOL] + _RATE
+# union of production columns to build lag tables from (whatever is present). half_ppr
+# (season total) is carried for the naive baseline only; it is NOT a model feature.
+_LAG_STATS = ["half_ppr", "half_ppr_ppg", "games"] + [s + "_pg" for s in _PG_VOL] + _RATE
 
 # Per-position lag stats: only the production that matters for that position, so a QB
 # does not carry (near-zero) receiving columns and a WR does not carry passing columns.
@@ -99,6 +100,50 @@ def _madden_lagged(madden: pd.DataFrame, k: int) -> pd.DataFrame:
     return m.rename(columns={c: f"lag{k}_{c}" for c in cols})
 
 
+# Sample-size shrinkage, targeted at THIN HISTORY (few seasons), not few games. A
+# player with only one prior NFL season (a rookie's hot partial year) has no track
+# record to confirm the rate, so it is pulled toward a typical-contributor prior. A
+# veteran with 2+ seasons is left untouched, even if a season was injury-shortened -
+# so this does not re-add an injury penalty. W_SINGLE = weight kept on a one-season
+# player's own rate; W_DOUBLE = weight for a two-season player (near 1).
+W_SINGLE = 0.50
+W_DOUBLE = 1.00
+# Rookie production is far less predictive for QB/WR/TE than for RB (rookie RBs who
+# produce tend to repeat), so shrink thin-history players only at these positions.
+SHRINK_POS = {"QB", "WR", "TE"}
+
+
+def _position_priors(ps: pd.DataFrame, pos: str, stats) -> dict:
+    # "typical contributor" baseline: unweighted mean over seasons with a real sample
+    sub = ps[(ps["position"] == pos)
+             & (pd.to_numeric(ps.get("games"), errors="coerce").fillna(0) >= 4)]
+    prior = {}
+    for s in stats:
+        if s in sub.columns:
+            v = pd.to_numeric(sub[s], errors="coerce")
+            if v.notna().any():
+                prior[s] = float(v.mean())
+    return prior
+
+
+def _shrink_lags(frame: pd.DataFrame, prior: dict, stats):
+    gcols = [f"lag{k}_games" for k in (1, 2, 3) if f"lag{k}_games" in frame.columns]
+    if not gcols:
+        return frame
+    n_prior = sum(pd.to_numeric(frame[c], errors="coerce").notna().astype(int)
+                  for c in gcols)
+    wt = pd.Series(1.0, index=frame.index)
+    wt[n_prior == 1] = W_SINGLE
+    wt[n_prior == 2] = W_DOUBLE
+    for k in (1, 2, 3):
+        for s in stats:
+            col = f"lag{k}_{s}"
+            if col in frame.columns and s in prior:
+                rate = frame[col]
+                frame[col] = rate.where(rate.isna(), wt * rate + (1 - wt) * prior[s])
+    return frame
+
+
 def build_frames(span_start: int, span_end: int,
                  positions=("QB", "RB", "WR", "TE")):
     """Return (frames, feature_cols) where frames[pos] is a modeling DataFrame.
@@ -150,6 +195,9 @@ def build_frames(span_start: int, span_end: int,
                             on=["season", "name_key"], how="left")
         for mh in (mh1, mh2, mh3):
             frame = frame.merge(mh, on=["name_key", "season"], how="left")
+        if pos in SHRINK_POS:
+            prod_stats = [s for s in POSITION_LAG[pos] if s != "games"]
+            _shrink_lags(frame, _position_priors(ps, pos, prod_stats), prod_stats)
 
         lag_feats = [f"lag{k}_{s}" for k in (1, 2, 3) for s in POSITION_LAG[pos]
                      if f"lag{k}_{s}" in frame.columns]
@@ -221,6 +269,9 @@ def build_projection_frame(target: int, positions=("QB", "RB", "WR", "TE")):
                             on=["season", "name_key"], how="left")
         for mh in (mh1, mh2, mh3):
             frame = frame.merge(mh, on=["name_key", "season"], how="left")
+        if pos in SHRINK_POS:
+            prod_stats = [s for s in POSITION_LAG[pos] if s != "games"]
+            _shrink_lags(frame, _position_priors(ps, pos, prod_stats), prod_stats)
         frame["has_prior"] = frame["lag1_half_ppr_ppg"].notna().astype(float)
 
         lag_feats = [f"lag{k}_{s}" for k in (1, 2, 3) for s in POSITION_LAG[pos]

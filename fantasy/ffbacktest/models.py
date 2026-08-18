@@ -27,8 +27,8 @@ def make_model(seed: int = 0) -> HistGradientBoostingRegressor:
 
 
 def baseline_prev_points(test: pd.DataFrame) -> np.ndarray:
-    """Predict last season's half-PPR total (per-game pace x games played)."""
-    return (test["lag1_half_ppr_ppg"] * test["lag1_games"]).to_numpy()
+    """Predict last season's actual half-PPR total (unshrunk)."""
+    return test["lag1_half_ppr"].to_numpy()
 
 
 def baseline_prev_ppg(test: pd.DataFrame) -> np.ndarray:
