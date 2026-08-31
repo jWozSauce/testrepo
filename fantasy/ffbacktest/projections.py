@@ -156,25 +156,58 @@ def _fit_predict(f, proj, feats, label_col, out_col):
     proj[out_col] = pred
 
 
+def _durability_games(f, proj):
+    """Durability-adjusted games projection. The raw games model over-weights last
+    season's games, so a young player with one injury year gets a low games projection
+    (and thus a low total). Blend the raw projection toward a durability expectation
+    (from Madden injury rating + age, plus the player's best recent healthy season) and
+    lean on it for players who have PROVEN they can play a full season - so an isolated
+    injury year is not treated as chronic."""
+    tr = f[(pd.to_numeric(f["games"], errors="coerce") >= 1)
+           & f["madden_injury"].notna() & f["age"].notna()]
+    if len(tr) < 30:
+        return proj["proj_games_raw"].clip(6, 17)
+    X = np.column_stack([np.ones(len(tr)), tr["madden_injury"].astype(float),
+                         tr["age"].astype(float)])
+    coef, *_ = np.linalg.lstsq(X, tr["games"].astype(float).to_numpy(), rcond=None)
+    raw = proj["proj_games_raw"]
+    pm = pd.to_numeric(proj["madden_injury"], errors="coerce")
+    pa = pd.to_numeric(proj["age"], errors="coerce")
+    pop = (coef[0] + coef[1] * pm + coef[2] * pa).where(pm.notna() & pa.notna())
+    pop = pop.fillna(raw)                              # fall back where rating/age missing
+    gcols = [c for c in ["lag1_games", "lag2_games", "lag3_games"] if c in proj.columns]
+    maxrec = proj[gcols].max(axis=1) if gcols else pd.Series(np.nan, index=proj.index)
+    dur = (0.5 * maxrec.fillna(pop) + 0.5 * pop).clip(6, 17)
+    proven = ((maxrec - 11) / 6).clip(0, 1).fillna(0.0)   # 0 at <=11 games, 1 at 17
+    w = 0.7 * proven
+    return ((1 - w) * raw + w * dur).fillna(raw).clip(6, 17)
+
+
 def project(target: int = 2026, span_start: int = 2015):
-    """Return {pos: DataFrame} of projected stat lines for the target season."""
+    """Return {pos: DataFrame} of projected stat lines. Season points are decomposed
+    into per-game production x durability-adjusted games, so availability (not just
+    talent) flows into the ranking and a one-off injury year does not tank a player."""
     frames, feat_cols = F.build_frames(span_start, target - 1, POS)
     proj_frames, _ = F.build_projection_frame(target, POS)
     ps = D.build_player_seasons(list(range(span_start, target)))
-    stats = sorted(set().union(*STAT_TARGETS.values()))
-    labels = ps[["player_id", "season"] + [c for c in stats if c in ps.columns]] \
-        .drop_duplicates(["player_id", "season"])
+    lab_cols = ["games", "half_ppr_ppg"] + [s + "_pg" for pos in POS
+                                            for s in STAT_TARGETS[pos] if s != "games"]
+    lab_cols = sorted(set(c for c in lab_cols if c in ps.columns))
+    labels = ps[["player_id", "season"] + lab_cols].drop_duplicates(["player_id", "season"])
 
     results = {}
     for pos in POS:
         f = frames[pos].merge(labels, on=["player_id", "season"], how="left")
         proj = proj_frames[pos].copy()
         feats = feat_cols[pos]
-        _fit_predict(f, proj, feats, "y", "proj_points")          # half-PPR total
-        for stat in STAT_TARGETS[pos]:
-            if stat in f.columns:
-                _fit_predict(f, proj, feats, stat, "proj_" + stat)
-        proj["proj_ppg"] = proj["proj_points"] / proj["proj_games"].clip(lower=1)
+        _fit_predict(f, proj, feats, "half_ppr_ppg", "proj_ppg")   # talent / role
+        _fit_predict(f, proj, feats, "games", "proj_games_raw")     # raw availability
+        proj["proj_games"] = _durability_games(f, proj)
+        proj["proj_points"] = proj["proj_ppg"] * proj["proj_games"]
+        for s in STAT_TARGETS[pos]:                                 # stat line: pg x games
+            if s != "games" and s + "_pg" in f.columns:
+                _fit_predict(f, proj, feats, s + "_pg", "proj_" + s + "_pg")
+                proj["proj_" + s] = proj["proj_" + s + "_pg"] * proj["proj_games"]
         proj = proj.sort_values("proj_points", ascending=False).reset_index(drop=True)
         proj["pos_rank"] = np.arange(1, len(proj) + 1)
         results[pos] = proj
