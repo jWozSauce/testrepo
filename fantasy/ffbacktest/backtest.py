@@ -19,6 +19,8 @@ from scipy.stats import spearmanr
 
 from . import features as F
 from . import models as M
+from . import data as D
+from .projections import _durability_games
 
 
 def _metrics(pos, season, y, yhat, prev):
@@ -40,31 +42,51 @@ def _metrics(pos, season, y, yhat, prev):
 
 def walk_forward(span_start: int, span_end: int, eval_seasons,
                  positions=("QB", "RB", "WR", "TE"),
-                 use_madden: bool = True, seed: int = 0):
-    """Return (per_season_df, predictions_df)."""
+                 use_madden: bool = True, seed: int = 0, decompose: bool = True):
+    """Return (per_season_df, predictions_df).
+
+    decompose=True mirrors the cheat sheet: season points = per-game production x
+    durability-adjusted games (two models multiplied). decompose=False uses a single
+    direct total model (the old behaviour), handy for A/B comparison.
+    """
     frames, feat_cols = F.build_frames(span_start, span_end, positions)
+    # per-game + games labels for the decomposition
+    ps = D.build_player_seasons(list(range(span_start, span_end + 1)))
+    labels = ps[["player_id", "season", "games", "half_ppr_ppg"]] \
+        .drop_duplicates(["player_id", "season"])
     rows, preds = [], []
     for pos in positions:
         if pos not in frames:
             continue
-        f = frames[pos]
+        f = frames[pos].merge(labels, on=["player_id", "season"], how="left")
         feats = list(feat_cols[pos])
         if not use_madden:
             feats = [c for c in feats if not c.startswith("madden_")]
         for Y in eval_seasons:
             train = f[f["season"] < Y]
-            test = f[f["season"] == Y]
+            test = f[f["season"] == Y].copy()
             if len(train) < 40 or test.empty:
                 continue
             # HistGB's binning crashes on features with <2 distinct non-NaN values
             # in the training slice, so keep only columns with real variation.
             usable = [c for c in feats if train[c].nunique(dropna=True) >= 2]
-            Xtr, ytr = train[usable].to_numpy(float), train["y"].to_numpy(float)
-            Xte, yte = test[usable].to_numpy(float), test["y"].to_numpy(float)
-            model = M.make_model(seed)
-            model.fit(Xtr, ytr)
-            yhat = model.predict(Xte)
-            prev = M.fill_baseline(M.baseline_prev_points(test), ytr.mean())
+            yte = test["y"].to_numpy(float)
+            if decompose:
+                trp = train[train["half_ppr_ppg"].notna()]
+                mp = M.make_model(seed)
+                mp.fit(trp[usable].to_numpy(float), trp["half_ppr_ppg"].to_numpy(float))
+                trg = train[train["games"].notna()]
+                mg = M.make_model(seed)
+                mg.fit(trg[usable].to_numpy(float), trg["games"].to_numpy(float))
+                test["proj_ppg"] = mp.predict(test[usable].to_numpy(float))
+                test["proj_games_raw"] = np.clip(mg.predict(test[usable].to_numpy(float)), 0, 17)
+                test["proj_games"] = _durability_games(train, test)
+                yhat = (test["proj_ppg"] * test["proj_games"]).to_numpy(float)
+            else:
+                model = M.make_model(seed)
+                model.fit(train[usable].to_numpy(float), train["y"].to_numpy(float))
+                yhat = model.predict(test[usable].to_numpy(float))
+            prev = M.fill_baseline(M.baseline_prev_points(test), train["y"].mean())
             rows.append(_metrics(pos, Y, yte, yhat, prev))
             p = test[["player_name", "season", "position", "y"]].copy()
             p["pred"] = yhat
