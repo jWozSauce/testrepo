@@ -6,6 +6,8 @@ formatted multi-tab workbook: an ALL-players tab plus one tab per position.
 """
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 
@@ -44,6 +46,29 @@ DISPLAY = {
 }
 VALUE_COLS = ["player_name", "position", "team", "tier", "adp_rank", "mdl_rank",
               "value", "proj_points", "vbd"]
+
+
+def fetch_live_adp(year=2026, teams=12, scoring="half-ppr", save_path=None):
+    """Pull current ADP from the Fantasy Football Calculator public API and return a
+    (name_key, adp_rank) table for skill positions. Optionally snapshot the raw rows."""
+    import subprocess
+    url = (f"https://fantasyfootballcalculator.com/api/v1/adp/{scoring}"
+           f"?teams={teams}&year={year}&position=all")
+    r = subprocess.run(["curl", "-sSL", "--compressed", "-A", "Mozilla/5.0", url],
+                       capture_output=True, text=True, timeout=40)
+    data = json.loads(r.stdout)
+    d = pd.DataFrame(data.get("players", []))
+    d = d[d["position"].isin(POS)].copy()
+    d["adp"] = pd.to_numeric(d["adp"], errors="coerce")
+    d = d.dropna(subset=["adp"]).sort_values("adp").reset_index(drop=True)
+    d["adp_rank"] = np.arange(1, len(d) + 1)
+    d["name_key"] = d["name"].map(normalize_name)
+    meta = data.get("meta", {})
+    print(f"live ADP: {meta.get('total_drafts')} drafts, "
+          f"{meta.get('start_date')}..{meta.get('end_date')}, {len(d)} skill players")
+    if save_path:
+        d[["adp_rank", "name", "position", "team", "adp"]].to_csv(save_path, index=False)
+    return d[["name_key", "adp_rank"]].drop_duplicates("name_key")
 
 
 def load_adp(path):
@@ -228,7 +253,7 @@ def _round(df):
     return df
 
 
-def export_excel(results, target, path, adp_path=None):
+def export_excel(results, target, path, adp=None):
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
@@ -245,8 +270,9 @@ def export_excel(results, target, path, adp_path=None):
 
     board_cols = list(BOARD_COLS)
     value_sheets = {}
-    if adp_path:
-        board = attach_adp(board, load_adp(adp_path))
+    if adp is not None:
+        adp_tbl = adp if isinstance(adp, pd.DataFrame) else load_adp(adp)
+        board = attach_adp(board, adp_tbl)
         # insert ADP + Value right after VBD on the board
         board_cols = ["vbd_rank", "player_name", "position", "tier", "team", "age",
                       "proj_points", "vbd", "adp_rank", "value", "proj_ppg", "pos_rank"]
@@ -297,10 +323,10 @@ def export_excel(results, target, path, adp_path=None):
             "least certain. A model baseline, not gospel.",
         ] + ([
             "",
-            "ADP = market consensus draft rank (attached file). Val = market_rank - model_rank",
+            "ADP = market consensus draft rank. Val = market_rank - model_rank",
             "among matched players: positive = model likes him more than the market (a VALUE),",
             "negative = market likes him more (a REACH). See the Values and Reaches tabs.",
-        ] if adp_path else [])})
+        ] if adp is not None else [])})
 
     with pd.ExcelWriter(path, engine="openpyxl") as xl:
         about.to_excel(xl, sheet_name="About", index=False)
